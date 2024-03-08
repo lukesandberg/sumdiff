@@ -22,4 +22,18 @@ What we are attempting to do is identify _logical_ and _prevalent_ changes.  For
 
 ## Examples
 
-TODO(luke)
+TODO(luke): get things working first
+
+## Implementation questions and decisions
+
+### Utf8 Validation?
+
+Should we validate our inputs as utf-8?  It seems reasonable however experience has shown that debugging a utf8 rejection error is difficult.  So on the one hand we could just make sure the error messages are useful, but on the other we could declare that this isn't _our_ problem.
+
+For the purposes of a diff tool we should assume that the inputs are useful to someone (they bothered to ask us to compare them), so rejecting them isn't particularly useful.
+
+### Struct of arrays vs array of structs
+
+When 'parsing' files we want to track metadata bout the data such as file offset, token length, AST depth, etc.  It would be tempting to construct a `struct Token` to represent this but instead we have chosen a 'struct of arrays' apporach and store metadata in parallel datastructures.
+
+Many algorithm runtimes will be dominated by the cost of scanning through token lists, while querying data about offset and depth is rarer, by moving that data to be stored elsewhere we slightly complicate some output algorithms in exchange for improving memory locality of our diff algorithms.
