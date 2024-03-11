@@ -1,3 +1,5 @@
+mod display;
+mod kc;
 mod lex;
 mod token;
 use std::fs;
@@ -26,30 +28,27 @@ fn main() {
                 }),
         )
     }
-    // We are missing the implementation of the diff function, so just do some dummy lexing
-    let mut left = buf_reader(&file_pair.left);
-    let mut right = buf_reader(&file_pair.right);
     let mut line_tokens = Tokens::new();
-    println!(
-        "left-lines: {:?}",
-        lex::lex_lines(&mut line_tokens, &mut left)
-    );
-    println!(
-        "right-lines: {:?}",
-        lex::lex_lines(&mut line_tokens, &mut right)
-    );
-    let mut fallback_tokens = Tokens::new();
-    println!(
-        "left-tokens: {:?}",
-        lex::fallback_lexer(&mut fallback_tokens, &fs::read(&file_pair.left).unwrap())
-    );
-    println!(
-        "right-tokens: {:?}",
-        lex::fallback_lexer(&mut fallback_tokens, &fs::read(&file_pair.right).unwrap())
-    );
+    let mut left_reader = buf_reader(&file_pair.left);
+    let left_lines = lex::lex_lines(&mut line_tokens, &mut left_reader).unwrap_or_else(|err| {
+        eprintln!("Unable to read {0}: {err}", file_pair.left);
+        process::exit(1)
+    });
+    let mut right_reader = buf_reader(&file_pair.right);
+    let right_lines = lex::lex_lines(&mut line_tokens, &mut right_reader).unwrap_or_else(|err| {
+        eprintln!("Unable to read {0}: {err}", file_pair.right);
+        process::exit(1)
+    });
+    let matches = kc::kc_lcs(&line_tokens, &left_lines.tokens, &right_lines.tokens);
+    display::display_diff(&line_tokens.printer(), &left_lines, &right_lines, &matches)
+        .unwrap_or_else(|err| {
+            eprintln!("Error while displaying diff: {err}");
+            process::exit(1)
+        });
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<FilePair, &'static str> {
+    args.next(); // skip the program name
     let left = match args.next() {
         Some(arg) => arg,
         None => return Err("Expected 2 arguments, got 0"),

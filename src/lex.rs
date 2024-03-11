@@ -115,9 +115,11 @@ mod tests {
         let mut r = io::BufReader::new("Hello, world!\nHow are you?\n".as_bytes());
         let parsed = lex_lines(&mut tokens, &mut r).unwrap();
         assert_eq!(parsed.tokens, vec![0, 1]);
+        assert_eq!(
+            tokens.get_token_images(&parsed.tokens),
+            vec!["Hello, world!\n", "How are you?\n"]
+        );
         assert_eq!(parsed.starts, vec![0, 14, 27]);
-        assert_eq!(tokens.get_token_image(0).unwrap(), "Hello, world!\n");
-        assert_eq!(tokens.get_token_image(1).unwrap(), "How are you?\n");
     }
 
     #[test]
@@ -127,10 +129,13 @@ mod tests {
         let parsed = fallback_lexer(&mut tokens, &mut r).unwrap();
         assert_eq!(parsed.tokens, vec![0, 1, 2, 3, 4, 2, 5, 2, 6, 2, 7, 8, 2]);
         assert_eq!(
+            tokens.get_token_images(&parsed.tokens),
+            vec!["Hello", ",", " ", "world", "!", " ", "How", " ", "are", " ", "you", "?", " "]
+        );
+
+        assert_eq!(
             parsed.starts,
             vec![0, 5, 6, 7, 12, 13, 14, 17, 18, 21, 22, 25, 26, 27]
         );
-        assert_eq!(tokens.get_token_image(0).unwrap(), "Hello");
-        assert_eq!(tokens.get_token_image(1).unwrap(), ",");
     }
 }
