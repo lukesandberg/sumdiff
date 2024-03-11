@@ -105,37 +105,18 @@ fn common_suffix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
 /// which improves on the classic algorithm by Hunt and Szymanski.
 ///
 /// This also includes a few minor optimizations
-/// * Use binary search to find insertion points
+/// * Use binary search to find insertion points in thresh
+///   - Saves substantial time in the worst case
 /// * Use binary search to find offsets in matchlist for each row
+///   - for larger matchlists this is substantial
+///   - TODO(luke): Use etzinger ordering for the matchlists to accelerate searches, this is a small improvement but improves cache locality
 /// * Use counting sort to build the matchlist (dropping O(NlogN) -> O(N) for the sort)
+///   - This is workable due to our tokenization technique, the universe of tokens is bound by the size of the inputs.
 /// * Use a pool of links to amortize allocation overheads
-/// * As matches are created we can clear out entries in the matchlist to allow them to be skipped on later iterations
+///   - This doesn't affect asymptotic complexity but does reduce the number of allocations and it is a practical
+///     enhancement.
+///   - The biggest opportunity is finding ways to allocate fewer DMatch nodes.
 ///
-/// The combination of binary searching and clearing entries reduces our worst case performance:
-///  - In the worst case the matchlist has size O(N^2) and we have to perform a binary search for
-///    each entry leading to O(N^2logN) time
-///  - In the best case the matchlist has size O(N) and we perform O(N) binary searches leading to O(NlogN) time
-///  - However, because we clear matchlist entries as we go, the matchlist size is reduced whenever we make a match
-///    which accelerates later searches.
-///
-/// Consider a match of a: 'abacad' and b: 'bacada'
-/// The canonical dynamic programming table looks like:
-/// L=[
-///  [0, 0, 0, 0, 0, 0, 0],
-///  [0, 0, 1, 1, 1, 1, 1],
-///  [0, 1, 1, 1, 1, 1, 1],
-///  [0, 1, 2, 2, 2, 2, 2],
-///  [0, 1, 2, 3, 3, 3, 3],
-///  [0, 1, 2, 3, 4, 4, 4],
-///  [0, 1, 2, 3, 4, 5, 5]
-/// ]
-/// This algorithm will compute the following 'thresh' arrays
-///  [0, 2]
-///  [0, 1]
-///  [0, 1, 2]
-///  [0, 1, 2, 3]
-///  [0, 1, 2, 3, 4]
-///  [0, 1, 2, 3, 4, 5]
 /// * TODO(luke): find a way to use the implicit histogram of the matchlist to leverage a patience sort technique
 pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(usize, usize)> {
     let prefix = common_prefix(left, right);
