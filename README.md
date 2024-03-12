@@ -32,7 +32,7 @@ Should we validate our inputs as utf-8?  It seems reasonable however experience 
 
 For the purposes of a diff tool we should assume that the inputs are useful to someone (they bothered to ask us to compare them), so rejecting them isn't particularly useful.
 
-### Struct of arrays vs array of structs
+### Struct of arrays vs array of structs?
 
 When 'parsing' files we want to track metadata bout the data such as file offset, token length, AST depth, etc.  It would be tempting to construct a `struct Token` to represent this but instead we have chosen a 'struct of arrays' apporach and store metadata in parallel datastructures.
 

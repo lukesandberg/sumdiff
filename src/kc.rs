@@ -109,7 +109,7 @@ fn common_suffix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
 ///   - Saves substantial time in the worst case
 /// * Use binary search to find offsets in matchlist for each row
 ///   - for larger matchlists this is substantial
-///   - TODO(luke): Use etzinger ordering for the matchlists to accelerate searches, this is a small improvement but improves cache locality
+///   - TODO(luke): Use Eytzinger ordering for the matchlists to accelerate searches, this is a small improvement but improves cache locality
 /// * Use counting sort to build the matchlist (dropping O(NlogN) -> O(N) for the sort)
 ///   - This is workable due to our tokenization technique, the universe of tokens is bound by the size of the inputs.
 /// * Use a pool of links to amortize allocation overheads
@@ -147,11 +147,11 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(us
     let mut links: Vec<usize> = vec![0; m + 1];
     let mut max_thresh = 1;
     for i in 0..n {
-        let range = matchlist.matches[i].clone();
+        let range = &matchlist.matches[i];
         if range.is_empty() {
             continue;
         }
-        let matches = &matchlist.right_indices[range];
+        let matches = &matchlist.right_indices[range.clone()];
         let mut k = 0;
         // These two fields serve as a tiny buffer to delay writes to the links array
         let mut r = 0;
@@ -187,7 +187,6 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(us
             j = matches[mi];
         }
         links[r] = c;
-        eprintln!("thresh: {:?}", thresh);
     }
 
     let mut result = Vec::with_capacity(max_thresh - 1);
