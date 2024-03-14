@@ -1,26 +1,28 @@
-use std::ops::Range;
+use std::{intrinsics::assume, ops::Range};
 
 use crate::token::{Token, Tokens};
 
 /// Peforms a simple 'counting' sort on the token array, but returns the indices of the sorted token locations
 /// rather than sorting the tokens themselves.
 /// So output[0] is the index of the first occurrence of the smallest token, and so on.
-fn sorted_indices(arr: &[Token], max_token: usize) -> Vec<usize> {
-    let mut counts: Vec<usize> = vec![0; max_token as usize];
+fn counting_sort(arr: &[Token], max_token: usize) -> Vec<usize> {
+    let mut counts: Vec<u32> = vec![0; max_token as usize];
     // Count the number of occurrences of each token
     for &i in arr.iter() {
         counts[i as usize] += 1;
     }
     // Tranform to a prefix sum
-    for i in 1..max_token {
-        counts[i] += counts[i - 1];
+    let mut accum = counts[0];
+    for i in 1..counts.len() {
+        accum += counts[i];
+        counts[i] = accum;
     }
     let mut indices: Vec<usize> = vec![0; arr.len()];
     for i in (0..arr.len()).rev() {
         let token = arr[i];
         let count = counts[token as usize] - 1;
         counts[token as usize] = count;
-        indices[count] = i;
+        indices[count as usize] = i;
     }
     indices
 }
@@ -39,8 +41,8 @@ impl MatchList {
         debug_assert!(left.len() > 0);
         debug_assert!(right.len() > 0);
         let max_token = tokens.token_upper_bound();
-        let left_indices = sorted_indices(left, max_token);
-        let mut right_indices = sorted_indices(right, max_token);
+        let left_indices = counting_sort(left, max_token);
+        let mut right_indices = counting_sort(right, max_token);
         let mut matches: Vec<Range<usize>> = vec![0..0; left.len()];
         let mut i = 0;
         let mut ri = 0;
@@ -234,9 +236,9 @@ mod tests {
         assert_eq!(common_suffix(&a, &b), 0);
     }
     #[test]
-    fn test_sorted_indices() {
+    fn test_counting_sort() {
         let arr = vec![1, 2, 1, 2, 1, 2];
-        let indices = sorted_indices(&arr, 10);
+        let indices = counting_sort(&arr, 10);
         assert_eq!(indices, vec![0, 2, 4, 1, 3, 5]);
     }
     #[test]
