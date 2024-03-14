@@ -15,6 +15,7 @@ impl Tokens {
             universe: HashMap::new(),
         }
     }
+    // A token that is guaranteed to be > all known tokens
     pub fn token_upper_bound(&self) -> usize {
         self.universe.len()
     }
@@ -23,7 +24,7 @@ impl Tokens {
         match self.universe.get(s) {
             Some(token) => *token,
             None => {
-                let id = self.universe.len() as Token;
+                let id = self.get_next_token();
                 // Since we only have an immutable reference we need to copy to insert
                 self.universe.insert(s.clone(), id);
                 id
@@ -32,14 +33,18 @@ impl Tokens {
     }
     /// Get the token for a string, creating a new one if necessary.
     pub fn get_token(&mut self, s: Vec<u8>) -> Token {
-        let len = self.universe.len() as Token;
+        let next_token = self.get_next_token();
         match self.universe.entry(s) {
             std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
             std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(len);
-                len
+                entry.insert(next_token);
+                next_token
             }
         }
+    }
+
+    fn get_next_token(&self) -> Token {
+        (self.universe.len()) as Token
     }
 
     /// Get the string for a token, used only for testing.

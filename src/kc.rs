@@ -1,4 +1,4 @@
-use std::{intrinsics::assume, ops::Range};
+use std::ops::Range;
 
 use crate::token::{Token, Tokens};
 
