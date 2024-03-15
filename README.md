@@ -37,3 +37,10 @@ For the purposes of a diff tool we should assume that the inputs are useful to s
 When 'parsing' files we want to track metadata bout the data such as file offset, token length, AST depth, etc.  It would be tempting to construct a `struct Token` to represent this but instead we have chosen a 'struct of arrays' apporach and store metadata in parallel datastructures.
 
 Many algorithm runtimes will be dominated by the cost of scanning through token lists, while querying data about offset and depth is rarer, by moving that data to be stored elsewhere we slightly complicate some output algorithms in exchange for improving memory locality of our diff algorithms.
+
+
+## TODO
+
+### SIMD
+
+The counting sort implementation requires a prefix-sum computation, this can be accomplished more quickly using SIMD a clear TODO, however since `std::simd` is unstable this is going to be complex. 
