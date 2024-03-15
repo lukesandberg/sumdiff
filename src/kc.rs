@@ -179,14 +179,20 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(us
             // Search for the next match index, greater than this one and smaller than the previous threshold
             // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
             // at indexes greater than k are strictly greater than prev_thresh
-            mi = match matches[mi + 1..].binary_search(&(prev_thresh + 1)) {
-                Ok(i) => i + mi + 1,
-                Err(i) => i + mi + 1,
+            mi += 1;
+            j = match matches[mi..].binary_search(&(prev_thresh + 1)) {
+                Ok(i) => {
+                    mi += i;
+                    matches[mi]
+                }
+                Err(i) => {
+                    mi += i;
+                    if mi == matches.len() {
+                        break;
+                    }
+                    matches[mi]
+                }
             };
-            if mi == matches.len() {
-                break;
-            }
-            j = matches[mi];
         }
         links[r] = c;
     }
