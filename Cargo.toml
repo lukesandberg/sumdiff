@@ -2,8 +2,18 @@
 name = "sumdiff"
 version = "0.1.0"
 edition = "2021"
+authors = ["Luke Sandberg <lukeisandberg@gmail.com>"]
+
+
+[lib]
+name="sumdifflib"
+path = "src/lib.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "sumdiff"
+path = "src/main.rs"
 
 [dependencies]
 
