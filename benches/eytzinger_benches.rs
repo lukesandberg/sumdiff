@@ -58,39 +58,27 @@ fn recursive_eyt_rv(v: &[usize]) -> Vec<usize> {
     output
 }
 
-const SIZE: &[usize] = &[
-    1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072,
-];
+const SIZE: &[usize] = &[2, 16, 256, 4096, 65536, 1024 * 1024, 8 * 1024 * 1024];
 fn eyt_construction_bench(c: &mut Criterion) {
-    {
-        let mut group = c.benchmark_group("recursive_eyt_rv");
-        for size in SIZE {
-            group.throughput(Throughput::Elements(*size as u64));
-            group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, size| {
+    let mut group = c.benchmark_group("eyt_construction");
+    for size in SIZE {
+        group.throughput(Throughput::Elements(*size as u64));
+        group.bench_with_input(
+            BenchmarkId::new("recursive_eyt_rv", size),
+            size,
+            |b, size| {
                 let input: Vec<usize> = (0..*size).collect();
                 b.iter(|| recursive_eyt_rv(&input));
-            });
-        }
-    }
-    {
-        let mut group = c.benchmark_group("eytzingerize");
-        for size in SIZE {
-            group.throughput(Throughput::Elements(*size as u64));
-            group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, size| {
-                let input: Vec<usize> = (0..*size).collect();
-                b.iter(|| eytzingerize(&input));
-            });
-        }
-    }
-    {
-        let mut group = c.benchmark_group("bfs_eyt");
-        for size in SIZE {
-            group.throughput(Throughput::Elements(*size as u64));
-            group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, size| {
-                let input: Vec<usize> = (0..*size).collect();
-                b.iter(|| bfs_eyt(&input));
-            });
-        }
+            },
+        );
+        group.bench_with_input(BenchmarkId::new("eytzingerize", size), size, |b, size| {
+            let input: Vec<usize> = (0..*size).collect();
+            b.iter(|| eytzingerize(&input));
+        });
+        group.bench_with_input(BenchmarkId::new("bfs_eyt", size), size, |b, size| {
+            let input: Vec<usize> = (0..*size).collect();
+            b.iter(|| bfs_eyt(&input));
+        });
     }
 }
 
@@ -108,44 +96,34 @@ fn search_eyt(c: &mut Criterion) {
             (sorted, eyt)
         })
         .collect();
-    {
-        let mut group = c.benchmark_group("search_eyt");
-        for (sorted, eyt) in &vecs {
-            let size = sorted.len() as u64;
-            let max = sorted.last().unwrap();
-            group.throughput(Throughput::Elements(size));
 
-            group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
-                let mut rng = thread_rng();
-                let cloned_eyt = eyt.clone(); // Clone the eyt variable
-                b.iter_batched(
-                    move || rng.gen_range(1..*max + 1),
-                    move |i| eytzinger_search(&cloned_eyt, i), // Use the cloned_eyt variable
-                    BatchSize::SmallInput,
-                );
-            });
-        }
-    }
-    {
-        let mut group = c.benchmark_group("search_binary");
-        for (sorted, _) in &vecs {
-            let size = sorted.len() as u64;
-            let max = sorted.last().unwrap();
-            group.throughput(Throughput::Elements(size));
+    let mut group = c.benchmark_group("search");
+    for (sorted, eyt) in &vecs {
+        let size = sorted.len() as u64;
+        let max = sorted.last().unwrap();
+        group.throughput(Throughput::Elements(size));
 
-            group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
-                let mut rng = thread_rng();
-                let cloned_sorted = sorted.clone(); // Clone the eyt variable
-                b.iter_batched(
-                    move || rng.gen_range(1..*max + 1),
-                    move |i| match &cloned_sorted.binary_search(&i) {
-                        Ok(i) => *i,
-                        Err(i) => *i,
-                    },
-                    BatchSize::SmallInput,
-                );
-            });
-        }
+        group.bench_with_input(BenchmarkId::new("eytzinger", size), &size, |b, _| {
+            let mut rng = thread_rng();
+            let cloned_eyt = eyt.clone(); // Clone the eyt variable
+            b.iter_batched(
+                move || rng.gen_range(1..*max + 1),
+                move |i| eytzinger_search(&cloned_eyt, i), // Use the cloned_eyt variable
+                BatchSize::SmallInput,
+            );
+        });
+        group.bench_with_input(BenchmarkId::new("binary", size), &size, |b, _| {
+            let mut rng = thread_rng();
+            let cloned_sorted = sorted.clone(); // Clone the eyt variable
+            b.iter_batched(
+                move || rng.gen_range(1..*max + 1),
+                move |i| match &cloned_sorted.binary_search(&i) {
+                    Ok(i) => *i,
+                    Err(i) => *i,
+                },
+                BatchSize::SmallInput,
+            );
+        });
     }
 }
 
