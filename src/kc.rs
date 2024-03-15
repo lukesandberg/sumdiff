@@ -1,4 +1,7 @@
-use std::ops::Range;
+use std::{
+    mem::{transmute, MaybeUninit},
+    ops::Range,
+};
 
 use crate::token::{Token, Tokens};
 
@@ -17,14 +20,16 @@ fn counting_sort(arr: &[Token], max_token: usize) -> Vec<usize> {
         accum += counts[i];
         counts[i] = accum;
     }
-    let mut indices: Vec<usize> = vec![0; arr.len()];
+    // We don't need to initialize the slice since we will overwrite all the elements
+    let mut indices = vec![MaybeUninit::<usize>::uninit(); arr.len()];
     for i in (0..arr.len()).rev() {
         let token = arr[i];
         let count = counts[token as usize] - 1;
         counts[token as usize] = count;
-        indices[count as usize] = i;
+        indices[count as usize] = MaybeUninit::new(i);
     }
-    indices
+    // SAFETY: safe because we are guaranteed to have initialized all the elements of indices
+    unsafe { transmute(indices) }
 }
 
 struct MatchList {
@@ -135,7 +140,8 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(us
     let right = &right[prefix..(right.len() - suffix)];
     let n = left.len();
     let m = right.len();
-    let mut thresh = vec![n; m + 1];
+    // drop Vec methods for extending and memory supporting it
+    let mut thresh = vec![n; m + 1].into_boxed_slice();
     thresh[0] = 0;
     let matchlist = MatchList::build(tokens, left, right);
     // TODO: justify capacities
