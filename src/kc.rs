@@ -107,6 +107,54 @@ fn common_suffix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
     i
 }
 
+/// A branchfree implementation of binary search over a subrange
+/// It is the callers responsibility to ensure that offset and end are in range
+///
+/// For our usecase this significantly outperforms the standard library binary search.
+fn binary_search_range(arr: &[usize], offset: usize, end: usize, x: usize) -> usize {
+    let mut low = offset;
+    let mut size = end - low;
+    // The loop condition is easy to predict but the comparison within the
+    // loop is not.  So we take care to ensure that that uses a conditional move
+    // instruction.
+    while size > 1 {
+        let half = size / 2;
+        let mid = low + size / 2;
+        // SAFETY: mid is always >= offset and < end
+        let mid_value = unsafe { *arr.get_unchecked(mid) };
+        // This is compiled to conditional moves
+        low = if mid_value < x { mid } else { low };
+        size -= half;
+    }
+    let low_value = unsafe { *arr.get_unchecked(low) };
+    // This branch is unpredictable but it is only taken once and generally compiled to a conditional increment.
+    if low_value < x {
+        low + 1
+    } else {
+        low
+    }
+}
+
+/// Returns the index of the greatest element of `arr` that is <= `x` using the exponential search algorithm.
+///
+/// Exponential search is a good fit for our use case because it is very efficient when the target is expected to be near the beginning of the array.
+fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usize) -> usize {
+    let mut bound = 1;
+    let mut probe = offset + bound;
+    while probe < end && unsafe { *arr.get_unchecked(probe) } < x {
+        bound *= 2;
+        probe = offset + bound;
+    }
+    return binary_search_range(
+        arr,
+        // start at the previous search location which we know is <=x
+        offset + bound / 2,
+        // end needs to be at most the size of the array or one past the last test which is >= x
+        std::cmp::min(end, probe + 1),
+        x,
+    );
+}
+
 /// Returns the longest common subsequence of two sequences of tokens using
 /// the algorithm described by [Kuo and Cross](https://dl.acm.org/doi/pdf/10.1145/74697.74702)
 /// which improves on the classic algorithm by Hunt and Szymanski.
@@ -168,10 +216,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(us
         // This also reserves the 0th entry for the dummy value above and simplifies read-out.
         let mut j = matches[mi];
         loop {
-            k = match thresh[k..max_thresh].binary_search(&j) {
-                Ok(i) => k + i,
-                Err(i) => k + i,
-            };
+            k = exponential_search_range(&thresh, k, max_thresh, j);
             let prev_thresh = thresh[k];
             thresh[k] = j;
             max_thresh = std::cmp::max(max_thresh, k + 1);
@@ -186,19 +231,11 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(us
             // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
             // at indexes greater than k are strictly greater than prev_thresh
             mi += 1;
-            j = match matches[mi..].binary_search(&(prev_thresh + 1)) {
-                Ok(i) => {
-                    mi += i;
-                    matches[mi]
-                }
-                Err(i) => {
-                    mi += i;
-                    if mi == matches.len() {
-                        break;
-                    }
-                    matches[mi]
-                }
-            };
+            mi = exponential_search_range(&matches, mi, matches.len(), prev_thresh + 1);
+            if mi >= matches.len() {
+                break;
+            }
+            j = matches[mi]
         }
         links[r] = c;
     }
@@ -264,6 +301,23 @@ mod tests {
         assert_eq!(matchlist.matches, vec![0..0, 0..1, 1..3]);
     }
 
+    #[test]
+    fn test_binary_search_suffix() {
+        let arr = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        assert_eq!(binary_search_range(&arr, 0, arr.len(), 0), 0);
+        assert_eq!(binary_search_range(&arr, 0, arr.len(), 5), 5);
+        assert_eq!(binary_search_range(&arr, 0, arr.len(), 9), 9);
+        assert_eq!(binary_search_range(&arr, 0, arr.len(), 10), 10);
+    }
+
+    #[test]
+    fn test_exponential_search_suffix() {
+        let arr = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        assert_eq!(exponential_search_range(&arr, 0, arr.len(), 0), 0);
+        assert_eq!(exponential_search_range(&arr, 0, arr.len(), 5), 5);
+        assert_eq!(exponential_search_range(&arr, 0, arr.len(), 9), 9);
+        assert_eq!(exponential_search_range(&arr, 0, arr.len(), 10), 10);
+    }
     #[cfg(test)]
     mod kc_tests {
         use super::*;
