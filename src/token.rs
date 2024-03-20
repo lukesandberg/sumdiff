@@ -8,6 +8,12 @@ pub struct Tokens {
     // 2. a trivial mechanism for looking up a key by value
     universe: HashMap<Vec<u8>, Token>,
 }
+impl Default for Tokens {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tokens {
     #[must_use]
     pub fn new() -> Self {
