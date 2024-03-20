@@ -84,12 +84,11 @@ impl MatchList {
     }
 }
 
-// TODO: find a way to compress this to more efficiently encode ranges of matches
-// An enum using the CommonRange structure should work.
 struct DMatch {
     i: usize,
     j: usize,
     prev: usize,
+    len: usize,
 }
 
 fn common_prefix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
@@ -162,14 +161,13 @@ fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usize) 
 /// the algorithm described by [Kuo and Cross](https://dl.acm.org/doi/pdf/10.1145/74697.74702)
 /// which improves on the classic algorithm by Hunt and Szymanski.
 ///
-/// This also includes a few minor optimizations
-/// * Use binary search to find insertion points in thresh
+/// This also includes a few minor optimizations over the algorithms described in the paper
+/// * Use exponential search to find insertion points in thresh
 ///   - Saves substantial time in the worst case
-/// * Use binary search to find offsets in matchlist for each row
+/// * Use exponential search to find offsets in matchlist for each row
 ///   - for larger matchlists this is substantial
-///   - TODO(luke): Use Eytzinger ordering for the matchlists to accelerate searches, this is a small improvement but improves cache locality
 /// * Use counting sort to build the matchlist (dropping O(NlogN) -> O(N) for the sort)
-///   - This is workable due to our tokenization technique, the universe of tokens is bound by the size of the inputs.
+///   - This is workable due to our tokenization technique, the universe of tokens is trivially bound by the size of the inputs.
 /// * Use a pool of links to amortize allocation overheads
 ///   - This doesn't affect asymptotic complexity but does reduce the number of allocations and it is a practical
 ///     enhancement.
@@ -205,7 +203,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<Com
     n -= prefix;
     m -= prefix;
     // drop Vec methods for extending and memory supporting it
-    let mut thresh = vec![n; m + 1].into_boxed_slice();
+    let mut thresh = vec![n; m + 1];
     thresh[0] = 0;
     let matchlist = MatchList::build(tokens, left, right);
     // TODO: justify capacities
@@ -215,6 +213,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<Com
         i: n,
         j: m,
         prev: 0,
+        len: 0,
     });
     let mut links: Vec<usize> = vec![0; m + 1];
     let mut max_thresh = 1;
@@ -239,10 +238,22 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<Com
             let prev = links[k - 1];
             links[r] = c;
             r = k;
-            c = link_pool.len();
-            // This is the most expensive thing in the loop, extending the link pool is costly.
-            // What we want to know is when it is safe to reuse a prior link.
-            link_pool.push(DMatch { i, j: j - 1, prev });
+            let prev_link = link_pool.get_mut(prev).unwrap();
+            // Check if we are simply extending a previous match.
+            if prev_link.i + prev_link.len == i && prev_link.j + prev_link.len == j - 1 {
+                prev_link.len += 1;
+                c = prev;
+            } else {
+                c = link_pool.len();
+                // This is the most expensive thing in the loop, extending the link pool is costly.
+                // What we want to know is when it is safe to reuse a prior link.
+                link_pool.push(DMatch {
+                    i,
+                    j: j - 1,
+                    prev,
+                    len: 1,
+                });
+            }
             // Search for the next match index, greater than this one and smaller than the previous threshold
             // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
             // at indexes greater than k are strictly greater than prev_thresh
@@ -260,16 +271,18 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<Com
         let mut i = links[max_thresh - 1];
         let link = &link_pool[i];
         let mut c: CommonRange = CommonRange {
-            left_start: prefix + link.i + 1,
-            right_start: prefix + link.j + 1,
+            left_start: prefix + link.i + link.len,
+            right_start: prefix + link.j + link.len,
             length: 0,
         };
         loop {
             let link = &link_pool[i];
-            if c.left_start == prefix + link.i + 1 && c.right_start == prefix + link.j + 1 {
-                c.length += 1;
-                c.left_start -= 1;
-                c.right_start -= 1;
+            if c.left_start == prefix + link.i + link.len
+                && c.right_start == prefix + link.j + link.len
+            {
+                c.length += link.len;
+                c.left_start -= link.len;
+                c.right_start -= link.len;
             } else {
                 debug_assert!(c.length > 0);
                 matches.push(c);
@@ -277,7 +290,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<Com
                 c = CommonRange {
                     left_start: prefix + link.i,
                     right_start: prefix + link.j,
-                    length: 1,
+                    length: link.len,
                 }
             };
 
@@ -446,6 +459,7 @@ mod tests {
                 length: Some(5),
                 value: Some(vec![(1, 0), (2, 1), (3, 2), (4, 3), (5, 4)])},
             only_prefix: LcsTest{left: "ab", right: "ac", length: Some(1), value: Some(vec![(0, 0)])},
+            middle_run: LcsTest{left: "abbbba", right: "cbbbbc", length: Some(4), value: Some(vec![(1, 1), (2, 2), (3,3), (4,4)])},
         }
         #[test]
         fn test_kc_lcs() {
