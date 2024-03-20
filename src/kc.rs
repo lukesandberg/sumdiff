@@ -1,6 +1,5 @@
 use std::{
     mem::{transmute, MaybeUninit},
-    ops::Range,
     vec,
 };
 
@@ -35,7 +34,7 @@ fn counting_sort(arr: &[Token], max_token: usize) -> Vec<usize> {
 
 struct MatchList {
     // The ranges are are indexes into `right_indices`
-    matches: Vec<Range<usize>>,
+    matches: Vec<(usize,usize)>,
     // N.B. These are 1-indexed to simplify later comparisons and allow for a zero sentinel value
     // This is a sorted list but will be mutated as we go.
     right_indices: Vec<usize>,
@@ -49,7 +48,7 @@ impl MatchList {
         let max_token = tokens.token_upper_bound();
         let left_indices = counting_sort(left, max_token);
         let mut right_indices = counting_sort(right, max_token);
-        let mut matches: Vec<Range<usize>> = vec![0..0; left.len()];
+        let mut matches = vec![MaybeUninit::<(usize,usize)>::uninit(); left.len()];
         let mut i = 0;
         let mut ri = 0;
         while i < left_indices.len() {
@@ -63,7 +62,7 @@ impl MatchList {
                 ri += 1;
             }
             loop {
-                matches[li] = match_start..ri;
+                matches[li] = MaybeUninit::new((match_start, ri));
                 i += 1;
                 if i >= left_indices.len() {
                     break;
@@ -78,7 +77,7 @@ impl MatchList {
             *item += 1
         }
         MatchList {
-            matches,
+            matches: unsafe { transmute(matches) },
             right_indices,
         }
     }
@@ -171,7 +170,18 @@ fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usize) 
 /// * Use a pool of links to amortize allocation overheads
 ///   - This doesn't affect asymptotic complexity but does reduce the number of allocations and it is a practical
 ///     enhancement.
-///   - The biggest opportunity is finding ways to allocate fewer DMatch nodes.
+///   - Compress DMatch nodes so they can efficiently represent ranges.
+///
+/// The runtime of this algorithm is complex
+///  - The matchlist is built in O(N) time (due to counting sort !)
+///  - The readout at the end takes at O(N) time (generally much faster)
+///  - Anaylyzing the loop is difficult
+///     - For each match we run 2 exponential searches, one is on thresh (thus O(logN)) the other is on the matchlist which is worse case
+///       O(logR) (where R is the size of the matchlist), but averaging across all incides of `n` we should expect O(log(sqrt(R)) instead
+///       In the worst case R is O(N^2), so again we should expect each match to take O(logN) time.
+///     - The number of matches is not easy to bound however. `R` is a trivial upper bound but it is not tight.
+/// 
+/// Thus the overall complexity is O(NlogN).
 ///
 /// * TODO(luke): find a way to use the implicit histogram of the matchlist to leverage a patience sort technique
 pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRange> {
@@ -219,10 +229,10 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
     let mut max_thresh = 1;
     for i in 0..n {
         let range = &matchlist.matches[i];
-        if range.is_empty() {
+        let matches = &matchlist.right_indices[range.0..range.1];
+        if matches.is_empty() {
             continue;
         }
-        let matches = &matchlist.right_indices[range.clone()];
         let mut k = 0;
         // These two fields serve as a tiny buffer to delay writes to the links array
         let mut r = 0;
@@ -355,7 +365,7 @@ mod tests {
         let c = tokens.get_token(b"c".to_vec());
         let d = tokens.get_token(b"d".to_vec());
         let matchlist = MatchList::build(&tokens, &vec![a, b, c], &vec![b, c, c, d]);
-        assert_eq!(matchlist.matches, vec![0..0, 0..1, 1..3]);
+        assert_eq!(matchlist.matches, vec![(0,0), (0,1), (1,3)]);
     }
 
     #[test]
