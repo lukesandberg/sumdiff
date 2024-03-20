@@ -10,16 +10,16 @@ use crate::token::{CommonRange, Token, Tokens};
 /// rather than sorting the tokens themselves.
 /// So output[0] is the index of the first occurrence of the smallest token, and so on.
 fn counting_sort(arr: &[Token], max_token: usize) -> Vec<usize> {
-    let mut counts: Vec<u32> = vec![0; max_token as usize];
+    let mut counts: Vec<u32> = vec![0; max_token];
     // Count the number of occurrences of each token
     for &i in arr.iter() {
         counts[i as usize] += 1;
     }
     // Tranform to a prefix sum
     let mut accum = counts[0];
-    for i in 1..counts.len() {
-        accum += counts[i];
-        counts[i] = accum;
+    for v in counts.iter_mut().skip(1) {
+        accum += *v;
+        *v = accum;
     }
     // We don't need to initialize the slice since we will overwrite all the elements
     let mut indices = vec![MaybeUninit::<usize>::uninit(); arr.len()];
@@ -44,8 +44,8 @@ struct MatchList {
 impl MatchList {
     // Builds a matchlist from two token lists in O(N+M) time with O(N+M) space
     fn build(tokens: &Tokens, left: &[Token], right: &[Token]) -> MatchList {
-        debug_assert!(left.len() > 0);
-        debug_assert!(right.len() > 0);
+        debug_assert!(!left.is_empty());
+        debug_assert!(!right.is_empty());
         let max_token = tokens.token_upper_bound();
         let left_indices = counting_sort(left, max_token);
         let mut right_indices = counting_sort(right, max_token);
@@ -74,8 +74,8 @@ impl MatchList {
                 }
             }
         }
-        for i in 0..right_indices.len() {
-            right_indices[i] += 1;
+        for item in &mut right_indices {
+            *item += 1
         }
         MatchList {
             matches,
@@ -147,14 +147,14 @@ fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usize) 
         bound *= 2;
         probe = offset + bound;
     }
-    return binary_search_range(
+    binary_search_range(
         arr,
         // start at the previous search location which we know is <=x
         offset + bound / 2,
         // end needs to be at most the size of the array or one past the last test which is >= x
         std::cmp::min(end, probe + 1),
         x,
-    );
+    )
 }
 
 /// Returns the longest common subsequence of two sequences of tokens using
@@ -174,7 +174,7 @@ fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usize) 
 ///   - The biggest opportunity is finding ways to allocate fewer DMatch nodes.
 ///
 /// * TODO(luke): find a way to use the implicit histogram of the matchlist to leverage a patience sort technique
-pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<CommonRange> {
+pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRange> {
     let mut n = left.len();
     let mut m = right.len();
     if n == 0 || m == 0 {
@@ -258,7 +258,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<Com
             // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
             // at indexes greater than k are strictly greater than prev_thresh
             mi += 1;
-            mi = exponential_search_range(&matches, mi, matches.len(), prev_thresh + 1);
+            mi = exponential_search_range(matches, mi, matches.len(), prev_thresh + 1);
             if mi >= matches.len() {
                 break;
             }

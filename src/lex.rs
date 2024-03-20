@@ -19,13 +19,12 @@ pub fn lex_lines(tokens: &mut Tokens, r: &mut impl BufRead) -> io::Result<Parsed
         } else {
             let trailing_newline = line.last() == Some(&b'\n');
             if trailing_newline {
-                line.pop();// remove the trailiing newline
-            }else {
+                line.pop(); // remove the trailiing newline
+            } else {
                 // To mark the lack of a newline we add a special trailing token with an embedded newline
                 line.extend(b"\n\\ No newline at end of file");
-                
             } // remove the newline
-            let token = tokens.get_token_ref(if trailing_newline { &line } else { &line });
+            let token = tokens.get_token_ref(&line);
             line.clear();
             lines.push(token);
             starts.push(offset);
@@ -43,52 +42,27 @@ pub fn fallback_lexer(tokens: &mut Tokens, contents: &[u8]) -> io::Result<Parsed
     let mut starts: Vec<usize> = Vec::new();
     let mut offset: usize = 0;
     let mut current_class = CharClass::Word;
-    fn push_token(
-        next_class: CharClass,
-        end: usize,
-        contents: &[u8],
-        starts: &mut Vec<usize>,
-        toks: &mut Vec<Token>,
-        offset: &mut usize,
-        current_class: &mut CharClass,
-        tokens: &mut Tokens,
-    ) {
-        let token_image = match current_class {
-            CharClass::Whitespace => [b' '].to_vec(),
-            _ => contents[*offset..end].to_vec(),
-        };
-        let token = tokens.get_token(token_image);
-        toks.push(token);
-        starts.push(*offset);
-        *offset = end;
-        *current_class = next_class;
-    }
-    for (i, &c) in contents.iter().enumerate() {
-        let next_class = classify(c);
+
+    for (index, next_class) in contents
+        .iter()
+        .map(|c: &u8| classify(*c))
+        .enumerate()
+        .chain(std::iter::once((contents.len(), CharClass::Punctuation)))
+    {
         // Punctuation is always a token boundary
         if next_class != current_class || next_class == CharClass::Punctuation {
-            push_token(
-                next_class,
-                i,
-                contents,
-                &mut starts,
-                &mut toks,
-                &mut offset,
-                &mut current_class,
-                tokens,
-            );
+            static SPACE: &[u8; 1] = b" ";
+            let token_image = match current_class {
+                CharClass::Whitespace => SPACE,
+                _ => &contents[offset..index],
+            };
+            let token = tokens.get_token_ref(token_image);
+            toks.push(token);
+            starts.push(offset);
+            offset = index;
+            current_class = next_class;
         }
     }
-    push_token(
-        CharClass::Punctuation,
-        contents.len(),
-        contents,
-        &mut starts,
-        &mut toks,
-        &mut offset,
-        &mut current_class,
-        tokens,
-    );
     starts.push(contents.len());
     Ok({
         Parsed {

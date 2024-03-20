@@ -34,7 +34,6 @@ fn test_null_diff() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
 #[test]
 fn test_single_diff() -> Result<(), Box<dyn std::error::Error>> {
     let a_file = assert_fs::NamedTempFile::new("a.txt")?;
@@ -43,13 +42,15 @@ fn test_single_diff() -> Result<(), Box<dyn std::error::Error>> {
     b_file.write_str("Goodbye\nsweet\nworld\n")?;
     let mut cmd = Command::cargo_bin("sumdiff")?;
     cmd.arg(a_file.path()).arg(b_file.path());
-    cmd.assert().success().stdout(predicate::str::ends_with("\
+    cmd.assert().success().stdout(predicate::str::ends_with(
+        "\
 @@ -1,3 +1,3 @@
  Goodbye
 -cruel
 +sweet
  world
-"));
+",
+    ));
     cmd.assert().success().stderr(predicate::str::is_empty());
     Ok(())
 }
@@ -62,7 +63,8 @@ fn test_missing_newline_new() -> Result<(), Box<dyn std::error::Error>> {
     b_file.write_str("Goodbye\nsweet\nworld")?;
     let mut cmd = Command::cargo_bin("sumdiff")?;
     cmd.arg(a_file.path()).arg(b_file.path());
-    cmd.assert().success().stdout(predicate::str::ends_with("\
+    cmd.assert().success().stdout(predicate::str::ends_with(
+        "\
 @@ -1,3 +1,3 @@
  Goodbye
 -cruel
@@ -70,11 +72,11 @@ fn test_missing_newline_new() -> Result<(), Box<dyn std::error::Error>> {
 +sweet
 +world
 \\ No newline at end of file
-"));
+",
+    ));
     cmd.assert().success().stderr(predicate::str::is_empty());
     Ok(())
 }
-
 
 #[test]
 fn test_missing_newline_old() -> Result<(), Box<dyn std::error::Error>> {
@@ -84,7 +86,8 @@ fn test_missing_newline_old() -> Result<(), Box<dyn std::error::Error>> {
     b_file.write_str("Goodbye\nsweet\nworld\n")?;
     let mut cmd = Command::cargo_bin("sumdiff")?;
     cmd.arg(a_file.path()).arg(b_file.path());
-    cmd.assert().success().stdout(predicate::str::ends_with("\
+    cmd.assert().success().stdout(predicate::str::ends_with(
+        "\
 @@ -1,3 +1,3 @@
  Goodbye
 -cruel
@@ -92,7 +95,8 @@ fn test_missing_newline_old() -> Result<(), Box<dyn std::error::Error>> {
 \\ No newline at end of file
 +sweet
 +world
-"));
+",
+    ));
     cmd.assert().success().stderr(predicate::str::is_empty());
     Ok(())
 }

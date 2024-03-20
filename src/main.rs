@@ -32,14 +32,8 @@ fn main() {
         // By conventions empty diffs produce no output
         return;
     }
-    println!(
-        "--- {}",
-        file_pair.left
-    );
-    println!(
-        "+++ {}",
-        file_pair.right
-    );
+    println!("--- {}", file_pair.left);
+    println!("+++ {}", file_pair.right);
     display_diff(
         &DisplayConfig {
             insert_prefix: b"+",
@@ -58,7 +52,6 @@ fn main() {
         process::exit(1)
     });
 }
-
 
 fn tokenize_or_die(file_name: &String, line_tokens: &mut Tokens) -> Parsed {
     let file = fs::OpenOptions::new()

@@ -141,7 +141,7 @@ fn matches_to_hunk_parts(
             }));
         }
         if range.length > 0 {
-            hunk_parts.push(HunkPart::Common(range.clone()));
+            hunk_parts.push(HunkPart::Common(*range));
         }
         prev_left_end = range.left_start + range.length;
         prev_right_end = range.right_start + range.length;
@@ -165,11 +165,11 @@ pub fn matches_to_hunks(
                 right_start,
                 length,
             }) => {
-                let more = index < raw_parts.len()-1;
+                let more = index < raw_parts.len() - 1;
                 if let Some(last_hunk) = hunks.last_mut() {
                     // If the common part added to the previous hunk would overlap with the next hunk
                     // we instead merge the hunks even thought the common context is longer.
-                    if *length < 2 * max_context_tokens && more{
+                    if *length < 2 * max_context_tokens && more {
                         last_hunk.add_part(hunk);
                         continue; // We want to keep extending
                     } else {
@@ -470,15 +470,18 @@ mod tests {
         assert_eq!(
             matches_to_hunks(
                 3,
-                &[CommonRange {
-                    left_start: 0,
-                    right_start: 0,
-                    length: 1
-                },CommonRange {
-                    left_start: 2,
-                    right_start: 2,
-                    length: 1
-                }],
+                &[
+                    CommonRange {
+                        left_start: 0,
+                        right_start: 0,
+                        length: 1
+                    },
+                    CommonRange {
+                        left_start: 2,
+                        right_start: 2,
+                        length: 1
+                    }
+                ],
                 3,
                 3
             ),
@@ -500,5 +503,4 @@ mod tests {
             }]
         );
     }
-
 }

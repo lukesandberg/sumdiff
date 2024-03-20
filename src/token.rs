@@ -20,13 +20,13 @@ impl Tokens {
         self.universe.len()
     }
     /// Get the token for a string, creating a new one if necessary.
-    pub fn get_token_ref(&mut self, s: &Vec<u8>) -> Token {
+    pub fn get_token_ref(&mut self, s: &[u8]) -> Token {
         match self.universe.get(s) {
             Some(token) => *token,
             None => {
                 let id = self.get_next_token();
                 // Since we only have an immutable reference we need to copy to insert
-                self.universe.insert(s.clone(), id);
+                self.universe.insert(s.to_vec(), id);
                 id
             }
         }
@@ -60,7 +60,7 @@ impl Tokens {
     }
 
     /// Returns a printer that can recover token images from tokens.
-    pub fn printer<'a>(&'a self) -> TokenPrinter<'a> {
+    pub fn printer(&self) -> TokenPrinter {
         let mut keys = vec![&[] as &[u8]; self.universe.len()];
         for (k, v) in self.universe.iter() {
             keys.as_mut_slice()[*v as usize] = k;
