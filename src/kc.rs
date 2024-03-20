@@ -1,9 +1,10 @@
 use std::{
     mem::{transmute, MaybeUninit},
     ops::Range,
+    vec,
 };
 
-use crate::token::{Token, Tokens};
+use crate::token::{CommonRange, Token, Tokens};
 
 /// Peforms a simple 'counting' sort on the token array, but returns the indices of the sorted token locations
 /// rather than sorting the tokens themselves.
@@ -83,6 +84,8 @@ impl MatchList {
     }
 }
 
+// TODO: find a way to compress this to more efficiently encode ranges of matches
+// An enum using the CommonRange structure should work.
 struct DMatch {
     i: usize,
     j: usize,
@@ -173,21 +176,34 @@ fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usize) 
 ///   - The biggest opportunity is finding ways to allocate fewer DMatch nodes.
 ///
 /// * TODO(luke): find a way to use the implicit histogram of the matchlist to leverage a patience sort technique
-pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(usize, usize)> {
-    let prefix = common_prefix(left, right);
-    let prefix_matches: Vec<(usize, usize)> = (0..prefix).map(|i| (i, i)).collect();
-    if prefix == left.len() || prefix == right.len() {
-        return prefix_matches;
+pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<CommonRange> {
+    let mut n = left.len();
+    let mut m = right.len();
+    if n == 0 || m == 0 {
+        return vec![];
     }
+    let prefix = common_prefix(left, right);
+    let mut matches = Vec::new();
+    if prefix > 0 {
+        matches.push(CommonRange {
+            left_start: 0,
+            right_start: 0,
+            length: prefix,
+        });
+        // Exact match or one sequence is a prefix of the other
+        if prefix == n || prefix == m {
+            return matches;
+        }
+    }
+    // wait to append the suffix matches until after the main loop
     let suffix = common_suffix(left, right);
-    let suffix_matches: Vec<(usize, usize)> = (0..suffix)
-        .map(|i| (i + left.len() - suffix, i + right.len() - suffix))
-        .collect();
+    n -= suffix;
+    m -= suffix;
 
-    let left = &left[prefix..(left.len() - suffix)];
-    let right = &right[prefix..(right.len() - suffix)];
-    let n = left.len();
-    let m = right.len();
+    let left = &left[prefix..n];
+    let right = &right[prefix..m];
+    n -= prefix;
+    m -= prefix;
     // drop Vec methods for extending and memory supporting it
     let mut thresh = vec![n; m + 1].into_boxed_slice();
     thresh[0] = 0;
@@ -240,20 +256,48 @@ pub fn kc_lcs(tokens: &Tokens, left: &Vec<Token>, right: &Vec<Token>) -> Vec<(us
         links[r] = c;
     }
 
-    let mut result = Vec::with_capacity(max_thresh - 1);
     if max_thresh > 1 {
         let mut i = links[max_thresh - 1];
+        let link = &link_pool[i];
+        let mut c: CommonRange = CommonRange {
+            left_start: prefix + link.i + 1,
+            right_start: prefix + link.j + 1,
+            length: 0,
+        };
         loop {
             let link = &link_pool[i];
-            result.push((prefix + link.i, prefix + link.j));
+            if c.left_start == prefix + link.i + 1 && c.right_start == prefix + link.j + 1 {
+                c.length += 1;
+                c.left_start -= 1;
+                c.right_start -= 1;
+            } else {
+                debug_assert!(c.length > 0);
+                matches.push(c);
+
+                c = CommonRange {
+                    left_start: prefix + link.i,
+                    right_start: prefix + link.j,
+                    length: 1,
+                }
+            };
+
             if link.prev == 0 {
+                debug_assert!(c.length > 0);
+                matches.push(c);
                 break;
             }
             i = link.prev;
         }
-        result.reverse();
+        matches[1..].reverse();
     }
-    [prefix_matches, result, suffix_matches].concat().to_vec()
+    if suffix > 0 {
+        matches.push(CommonRange {
+            left_start: prefix + n,
+            right_start: prefix + m,
+            length: suffix,
+        });
+    }
+    matches
 }
 
 #[cfg(test)]
@@ -370,7 +414,7 @@ mod tests {
             let mut tokens = Tokens::new();
             let left_toks = chars_to_toks(&mut tokens, &test.left);
             let right_toks = chars_to_toks(&mut tokens, &test.right);
-            let lcs = kc_lcs(&tokens, &left_toks, &right_toks);
+            let lcs = CommonRange::flatten(&kc_lcs(&tokens, &left_toks, &right_toks));
             assert_eq!(lcs.len(), naive_lcs_length(&left_toks, &right_toks));
             match test.length {
                 Some(len) => assert_eq!(lcs.len(), len),
@@ -414,10 +458,14 @@ mod tests {
             let b = tokens.get_token(b"b".to_vec());
             let c = tokens.get_token(b"c".to_vec());
             let d = tokens.get_token(b"d".to_vec());
-            let lcs = kc_lcs(&tokens, &vec![a, b, c], &vec![b, a, c]);
+            let lcs = CommonRange::flatten(&kc_lcs(&tokens, &vec![a, b, c], &vec![b, a, c]));
             assert_eq!(lcs, vec![(1, 0), (2, 2)]);
 
-            let lcs = kc_lcs(&tokens, &vec![a, b, a, c, a, d], &vec![b, a, c, a, d, a]);
+            let lcs = CommonRange::flatten(&kc_lcs(
+                &tokens,
+                &vec![a, b, a, c, a, d],
+                &vec![b, a, c, a, d, a],
+            ));
             assert_eq!(lcs, vec![(1, 0), (2, 1), (3, 2), (4, 3), (5, 4)]);
         }
     }

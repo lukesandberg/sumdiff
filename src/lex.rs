@@ -17,7 +17,15 @@ pub fn lex_lines(tokens: &mut Tokens, r: &mut impl BufRead) -> io::Result<Parsed
             // Always add an offset for the end of the file
             starts.push(offset);
         } else {
-            let token = tokens.get_token_ref(&line);
+            let trailing_newline = line.last() == Some(&b'\n');
+            if trailing_newline {
+                line.pop();// remove the trailiing newline
+            }else {
+                // To mark the lack of a newline we add a special trailing token with an embedded newline
+                line.extend(b"\n\\ No newline at end of file");
+                
+            } // remove the newline
+            let token = tokens.get_token_ref(if trailing_newline { &line } else { &line });
             line.clear();
             lines.push(token);
             starts.push(offset);
@@ -117,7 +125,7 @@ mod tests {
         assert_eq!(parsed.tokens, vec![0, 1]);
         assert_eq!(
             tokens.get_token_images(&parsed.tokens),
-            vec!["Hello, world!\n", "How are you?\n"]
+            vec!["Hello, world!", "How are you?"]
         );
         assert_eq!(parsed.starts, vec![0, 14, 27]);
     }

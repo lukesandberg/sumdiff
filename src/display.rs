@@ -1,72 +1,79 @@
 use std::io::Error;
-use std::io::StdoutLock;
 use std::io::Write;
+use std::ops::Range;
 
+use crate::hunk::Hunk;
+use crate::hunk::HunkPart;
 use crate::token::{Parsed, Token, TokenPrinter};
 
+pub struct DisplayConfig {
+    pub insert_prefix: &'static [u8],
+    pub delete_prefix: &'static [u8],
+    pub common_prefix: &'static [u8],
+    pub token_suffix: &'static [u8],
+}
+
 pub fn display_diff(
+    config: &DisplayConfig,
     printer: &TokenPrinter,
     left: &Parsed,
     right: &Parsed,
-    matches: &[(usize, usize)],
+    hunks: &[Hunk],
+    mut writer: impl Write,
 ) -> Result<(), Error> {
-    let mut left_index = 0;
-    let mut right_index = 0;
-    let mut stdout = std::io::stdout().lock();
-    for (left_match, right_match) in matches {
-        flush_tokens(
-            printer,
-            &left.tokens,
-            left_index,
-            *left_match,
-            b"-",
-            &mut stdout,
-        )?;
-        flush_tokens(
-            printer,
-            &right.tokens,
-            right_index,
-            *right_match,
-            b"+",
-            &mut stdout,
-        )?;
-
-        // this means we matched some lines
-        stdout.write_all(b" ")?;
-        stdout.write_all(&printer.print(left.tokens[*left_match]))?;
-        left_index = *left_match + 1;
-        right_index = *right_match + 1;
+    for hunk in hunks {
+        writer.write_all(hunk.range().as_bytes())?;
+        for part in hunk.parts() {
+            match part {
+                HunkPart::Delete(range) => {
+                    flush_tokens(
+                        printer,
+                        &left.tokens,
+                        range,
+                        config.delete_prefix,
+                        config.token_suffix,
+                        &mut writer,
+                    )?;
+                }
+                HunkPart::Insert(range) => {
+                    flush_tokens(
+                        printer,
+                        &right.tokens,
+                        range,
+                        config.insert_prefix,
+                        config.token_suffix,
+                        &mut writer,
+                    )?;
+                }
+                HunkPart::Common(range) => {
+                    flush_tokens(
+                        printer,
+                        // could use left or right here, they are the same
+                        &left.tokens,
+                        &range.left_range(),
+                        config.common_prefix,
+                        config.token_suffix,
+                        &mut writer,
+                    )?;
+                }
+            }
+        }
     }
-    flush_tokens(
-        printer,
-        &left.tokens,
-        left_index,
-        left.tokens.len(),
-        b"-",
-        &mut stdout,
-    )?;
-    flush_tokens(
-        printer,
-        &right.tokens,
-        right_index,
-        right.tokens.len(),
-        b"+",
-        &mut stdout,
-    )?;
     Ok(())
 }
 
 fn flush_tokens(
     printer: &TokenPrinter,
     tokens: &[Token],
-    start: usize,
-    end: usize,
+    range: &Range<usize>,
     prefix: &[u8],
-    stdout: &mut StdoutLock,
+    suffix: &[u8],
+    writer: &mut impl std::io::Write,
 ) -> Result<(), Error> {
-    for token in &tokens[start..end] {
-        stdout.write_all(prefix)?;
-        stdout.write_all(&printer.print(*token))?;
+    for token in &tokens[range.clone()] {
+        writer.write_all(prefix)?;
+        writer.write_all(&printer.print(*token))?;
+        writer.write_all(suffix)?;
     }
     Ok(())
 }

@@ -16,7 +16,7 @@ name = "sumdiff"
 path = "src/main.rs"
 
 [dependencies]
-
+chrono = "0.4"
 
 [profile.dev]
 opt-level = 0
