@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 /// A Tokens is a collection of unique strings to unique token identifiers
 #[derive(Debug)]
@@ -98,6 +98,34 @@ pub struct Parsed {
     pub tokens: Vec<Token>,
     /// The start position of each token in the original file plus one additional entry marking the end of the last token
     pub starts: Vec<usize>,
+}
+
+/// A matching range of tokens across two files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommonRange {
+    /// The start of the common range in the left file
+    pub left_start: usize,
+    /// The start of the common range in the right file
+    pub right_start: usize,
+    /// The length of the common range
+    pub length: usize,
+}
+
+impl CommonRange {
+    pub fn left_range(self: &CommonRange) -> Range<usize> {
+        self.left_start..(self.left_start + self.length)
+    }
+    #[cfg(test)]
+    fn do_flatten(self: &CommonRange) -> Vec<(usize, usize)> {
+        (0..self.length)
+            .map(|i| (self.left_start + i, self.right_start + i))
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub fn flatten(ranges: &[CommonRange]) -> Vec<(usize, usize)> {
+        ranges.iter().flat_map(|r| r.do_flatten()).collect()
+    }
 }
 
 #[cfg(test)]
