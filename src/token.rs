@@ -121,14 +121,15 @@ impl CommonRange {
     pub fn left_range(self: &CommonRange) -> Range<usize> {
         self.left_start..(self.left_start + self.length)
     }
-    #[cfg(test)]
+
+    // Flatten a single range into a set of index pairs.
     fn do_flatten(self: &CommonRange) -> Vec<(usize, usize)> {
         (0..self.length)
             .map(|i| (self.left_start + i, self.right_start + i))
             .collect()
     }
 
-    #[cfg(test)]
+    /// Flatten a list of common ranges into a list of index pairs.
     pub fn flatten(ranges: &[CommonRange]) -> Vec<(usize, usize)> {
         ranges.iter().flat_map(|r| r.do_flatten()).collect()
     }
