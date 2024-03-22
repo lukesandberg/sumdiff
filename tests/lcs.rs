@@ -1,4 +1,5 @@
 use sumdifflib::{
+    dijkstra::dijkstra,
     kc::kc_lcs,
     token::{CommonRange, Token, Tokens},
 };
@@ -47,21 +48,40 @@ struct LcsTest {
     length: Option<usize>,
     value: Option<Vec<(usize, usize)>>,
 }
+
 fn do_lcs_test(test: LcsTest) {
     let mut tokens = Tokens::new();
     let left_toks = chars_to_toks(&mut tokens, &test.left);
     let right_toks = chars_to_toks(&mut tokens, &test.right);
-    let lcs = CommonRange::flatten(&kc_lcs(&tokens, &left_toks, &right_toks));
-    assert_eq!(lcs.len(), naive_lcs_length(&left_toks, &right_toks));
+    let kc_lcs = CommonRange::flatten(&kc_lcs(&tokens, &left_toks, &right_toks));
+    let dijkstra_lcs = CommonRange::flatten(&dijkstra(&left_toks, &right_toks));
+    let naive_lcs_len = naive_lcs_length(&left_toks, &right_toks);
+    assert_eq!(
+        kc_lcs.len(),
+        naive_lcs_len,
+        "Expected kc to produce an LCS of the correct length"
+    );
+    assert_eq!(
+        dijkstra_lcs.len(),
+        naive_lcs_len,
+        "Expected dijkstra to produce an LCS of the correct length"
+    );
     match test.length {
-        Some(len) => assert_eq!(lcs.len(), len),
+        Some(len) => {
+            assert_eq!(kc_lcs.len(), len);
+            assert_eq!(dijkstra_lcs.len(), len);
+        }
         None => {}
     }
     match test.value {
-        Some(value) => assert_eq!(lcs, value),
+        Some(value) => {
+            assert_eq!(kc_lcs, value);
+            assert_eq!(dijkstra_lcs, value);
+        }
         None => {}
     }
 }
+
 macro_rules! lcs_test {
             ($($name:ident: $value:expr,)*) => {
             $(
@@ -72,6 +92,8 @@ macro_rules! lcs_test {
             )*
             }
         }
+
+// Shared test cases, these should only be used when there is a single unique LCS
 lcs_test! {
     tiny: LcsTest{left: "a", right: "a", length: Some(1), value: Some(vec![(0, 0)])},
     left_empty: LcsTest{left: "", right: "a", length: Some(0), value: Some(vec![])},
@@ -83,8 +105,9 @@ lcs_test! {
         length: Some(5),
         value: Some(vec![(1, 0), (2, 1), (3, 2), (4, 3), (5, 4)])},
     only_prefix: LcsTest{left: "ab", right: "ac", length: Some(1), value: Some(vec![(0, 0)])},
-    middle_run: LcsTest{left: "abbbba", right: "cbbbbc", length: Some(4), value: Some(vec![(1, 1), (2, 2), (3,3), (4,4)])},
+    middle_run: LcsTest{left: "abba", right: "cbbc", length: Some(2), value: Some(vec![(1, 1), (2, 2)])},
 }
+
 #[test]
 fn test_kc_lcs() {
     let mut tokens = Tokens::new();

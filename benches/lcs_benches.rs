@@ -1,6 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{thread_rng, Rng};
 use sumdifflib::{
+    dijkstra::dijkstra,
     kc::kc_lcs,
     token::{Token, Tokens},
 };
@@ -60,6 +61,11 @@ fn lcs_benchmark(c: &mut Criterion) {
             group.bench_function("kc", |b| {
                 b.iter(|| {
                     kc_lcs(&tokens, &left, &right);
+                });
+            });
+            group.bench_function("dijkstra", |b| {
+                b.iter(|| {
+                    dijkstra(&left, &right);
                 });
             });
         }

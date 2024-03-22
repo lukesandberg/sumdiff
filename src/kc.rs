@@ -221,7 +221,11 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
             }
             i = link.prev;
         }
-        matches[1..].reverse();
+        if prefix > 0 {
+            matches[1..].reverse();
+        } else {
+            matches.reverse();
+        }
     }
     if suffix > 0 {
         matches.push(CommonRange {

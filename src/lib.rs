@@ -1,3 +1,4 @@
+pub mod dijkstra;
 pub mod display;
 pub mod eytzinger;
 pub mod hunk;
