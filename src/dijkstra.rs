@@ -36,7 +36,7 @@ use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashMap};
 
-use crate::lcs_utils::{common_prefix, common_suffix};
+use crate::lcs_utils::{remove_suffixes_and_prefixes, Trimmed};
 use crate::token::{CommonRange, Token};
 use std::rc::Rc;
 
@@ -49,31 +49,41 @@ struct Node {
 }
 
 impl Node {
-    fn neighbors(self: &Self, left: &[Token], right: &[Token]) -> Vec<(usize, usize, u32)> {
-        let can_advance_left = self.left_index + 1 < left.len();
-        let can_advance_right = self.right_index + 1 < left.len();
-        if can_advance_left || can_advance_right {
-            if can_advance_left && can_advance_right {
-                if left[self.left_index] == right[self.right_index] {
-                    return vec![
-                        (self.left_index + 1, self.right_index + 1, 0),
-                        (self.left_index + 1, self.right_index, 1),
-                        (self.left_index, self.right_index + 1, 1),
-                    ];
-                }
-                return vec![
-                    (self.left_index + 1, self.right_index, 1),
-                    (self.left_index, self.right_index + 1, 1),
-                ];
-            } else {
-                if can_advance_left {
-                    return vec![(self.left_index + 1, self.right_index, 1)];
-                } else {
-                    return vec![(self.left_index, self.right_index + 1, 1)];
-                }
-            }
+    /// Returns the neighbors of this node in the edit graph.
+    ///
+    /// The neighbors of a node (x,y) is either of sequences a and b of length n and m respectively
+    ///
+    /// - if `x`` == `n-1`` then `(`x, m-1)`` with cost `m-y` meaning we insert the rest of b
+    /// - if `y`` == `m-1`` then `(`n-1, y)`` with cost `n-x` meaning we delete the rest of a
+    /// - else if a[x] == b[y] then `neighbors((`x+1, y+1))` with cost 0 meaning we match
+    /// - else `(`x+1, y)`` with cost 1 and `(`x, y+1)`` with cost 1 meaning we either delete one token from a or or insert one token into b
+    ///
+    /// The special case is for the match, to reduce some overhead we follow the full diagonal.
+    fn neighbors(&self, left: &[Token], right: &[Token]) -> Vec<(usize, usize, u32)> {
+        let start_l = self.left_index;
+        let start_r = self.right_index;
+        let n = left.len();
+        let m = right.len();
+        if start_l == n || start_r == m {
+            // We are at the end of one of the sequences, just jump to the end
+            // This is the one place that the distance is >1.  This might require a special case in the caller
+            return vec![(n, m, std::cmp::max(n - start_l, m - start_r) as u32)];
         }
-        vec![]
+        // follow the whole diagonal
+        // TODO: this operation can be optimized to O(1) using two suffix arrays
+        let mut l = start_l;
+        let mut r = start_r;
+        if left[l] == right[r] {
+            l += 1;
+            r += 1;
+            while l < n && r < m && left[l] == right[r] {
+                l += 1;
+                r += 1;
+            }
+            return vec![(l, r, 0)];
+        }
+        // only explore non diagonal if we can't advance on the diagonal
+        vec![(start_l + 1, start_r, 1), (start_l, start_r + 1, 1)]
     }
 }
 
@@ -98,6 +108,33 @@ impl Ord for Node {
     }
 }
 
+fn recover_path(mut node: &Node, matches: &mut Vec<CommonRange>, prefix: usize) {
+    while let Some(ref pred) = &node.pred {
+        let left_delta = node.left_index - pred.left_index;
+        let right_delta = node.right_index - pred.right_index;
+        if left_delta == right_delta {
+            debug_assert!(left_delta == right_delta);
+            // This was a diagonal move
+            matches.push(CommonRange {
+                left_start: prefix + pred.left_index,
+                right_start: prefix + pred.right_index,
+                length: left_delta,
+            });
+        } else {
+            // This was a horizontal or vertical move
+            // TODO: find a way to avoid creating these nodes
+        }
+        node = pred;
+    }
+    // We should have made it back to the beginning.
+    debug_assert!(node.left_index == 0 && node.right_index == 0);
+    if prefix > 0 {
+        matches[1..].reverse();
+    } else {
+        matches.reverse();
+    }
+}
+
 /// An implementation of dijkstra's algorithm to find the shortest path through the edit
 /// graph between left and right.
 ///
@@ -107,60 +144,66 @@ impl Ord for Node {
 ///
 /// The edge weights are 0 for match edges (diagonals) and 1 for inserts or deletes
 pub fn dijkstra(left: &[Token], right: &[Token]) -> Vec<CommonRange> {
-    let mut n = left.len();
-    let mut m = right.len();
-    if n == 0 || m == 0 {
-        return vec![];
-    }
-    let prefix = common_prefix(left, right);
-    let mut matches = Vec::new();
-    if prefix > 0 {
-        matches.push(CommonRange {
-            left_start: 0,
-            right_start: 0,
-            length: prefix,
-        });
-        // Exact match or one sequence is a prefix of the other
-        if prefix == n || prefix == m {
+    let Trimmed {
+        left,
+        right,
+        mut matches,
+        prefix,
+        suffix,
+    } = match remove_suffixes_and_prefixes(left, right) {
+        Ok(matches) => {
             return matches;
         }
-    }
-    // wait to append the suffix matches until after the main loop
-    let suffix = common_suffix(left, right);
-    n -= suffix;
-    m -= suffix;
-    let left = &left[prefix..n];
-    let right = &right[prefix..m];
-    n -= prefix;
-    m -= prefix;
+        Err(t) => t,
+    };
+
+    let n = left.len();
+    let m = right.len();
+    debug_assert!((n > 1 && m > 0) || (n > 0 && m > 1), "n = {}, m = {}", n, m);
     let mut distances: HashMap<(usize, usize), u32> = HashMap::new();
+    // Because our distances are integers comparing them is incredibly fast
+    // So we should use a d-ary heap where d is probably at least 16.
+    // Additionally this would allow us to not store the distance in the node.
+    // Or use a bucket queue, which allows for O(1) insertions and deletions.
+    // In the case of a bucket queue I believe we would only need two buckets
+    // So perhaps we could just use a vecdeque and an integer to track the transition?
+    // neighbors with distance zero would go to the front and neighbors with distance one would go to the back.
+    // Or we could use two hashsets (or btreesets) to allow for O(1) deletions.
     let mut heap: BinaryHeap<Rc<Node>> = BinaryHeap::with_capacity(std::cmp::max(n, m));
 
     distances.insert((0, 0), 0);
-    let source = Rc::new(Node {
+    heap.push(Rc::new(Node {
         left_index: 0,
         right_index: 0,
         distance: 0,
         pred: None,
-    });
-    heap.push(source.clone());
-    let mut dest = None;
+    }));
     while let Some(node) = heap.pop() {
-        if distances.get(&(node.left_index, node.right_index)) != Some(&node.distance) {
+        let sl = node.left_index;
+        let sr = node.right_index;
+        if distances.get(&(sl, sr)) != Some(&node.distance) {
             // This means we found a shorter path to this node already.
             continue;
         }
-        if node.left_index == n - 1 && node.right_index == m - 1 {
-            dest = Some(node);
-            break;
+        if sl == n && sr == m {
+            recover_path(&node, &mut matches, prefix);
+            if suffix > 0 {
+                matches.push(CommonRange {
+                    left_start: prefix + n,
+                    right_start: prefix + m,
+                    length: suffix,
+                });
+            }
+            return matches;
         }
-        for (left, right, edge_weight) in node.neighbors(left, right) {
+        for (nleft, nright, edge_weight) in node.neighbors(left, right) {
             let neighbor_distance = node.distance + edge_weight;
-            let updated = match distances.entry((left, right)) {
+            let updated = match distances.entry((nleft, nright)) {
                 Entry::Occupied(entry) => {
                     let cur = entry.into_mut();
                     if *cur > neighbor_distance {
                         *cur = neighbor_distance;
+                        // TODO: delete the old node from the heap
                         true
                     } else {
                         false
@@ -175,70 +218,13 @@ pub fn dijkstra(left: &[Token], right: &[Token]) -> Vec<CommonRange> {
                 // This node may already be in the heap, but with a larger distance.
                 // our if-statement above will ensure it is ignored in that case.
                 heap.push(Rc::new(Node {
-                    left_index: left,
-                    right_index: right,
+                    left_index: nleft,
+                    right_index: nright,
                     distance: neighbor_distance,
                     pred: Some(node.clone()),
                 }));
             }
         }
     }
-    drop(heap);
-    drop(distances);
-    let mut node = &dest.unwrap();
-    let mut c: CommonRange = CommonRange {
-        left_start: prefix + node.left_index,
-        right_start: prefix + node.right_index,
-        length: if left[node.left_index] == right[node.right_index] {
-            1
-        } else {
-            0
-        },
-    };
-    loop {
-        match &node.pred {
-            Some(pred) => {
-                let is_match = left[pred.left_index] == right[pred.right_index];
-                if is_match
-                    && prefix + pred.left_index + 1 == c.left_start + c.length
-                    && prefix + pred.right_index + 1 == c.right_start + c.length
-                {
-                    c.length += 1;
-                    c.left_start -= 1;
-                    c.right_start -= 1;
-                } else {
-                    if c.length > 0 {
-                        matches.push(c);
-                    }
-                    c = CommonRange {
-                        left_start: prefix + pred.left_index,
-                        right_start: prefix + pred.right_index,
-                        length: if is_match { 1 } else { 0 },
-                    };
-                }
-                node = pred;
-            }
-            None => {
-                if c.length > 0 {
-                    matches.push(c);
-                }
-                break;
-            }
-        }
-    }
-
-    debug_assert!(*node == source);
-    if prefix > 0 {
-        matches[1..].reverse();
-    } else {
-        matches.reverse();
-    }
-    if suffix > 0 {
-        matches.push(CommonRange {
-            left_start: prefix + n,
-            right_start: prefix + m,
-            length: suffix,
-        });
-    }
-    matches
+    panic!("Should have found a path to the end");
 }

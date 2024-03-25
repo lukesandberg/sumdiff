@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    lcs_utils::{common_prefix, common_suffix, counting_sort, exponential_search_range},
+    lcs_utils::{counting_sort, exponential_search_range, remove_suffixes_and_prefixes, Trimmed},
     token::{CommonRange, Token, Tokens},
 };
 
@@ -95,33 +95,26 @@ struct DMatch {
 ///
 /// * TODO(luke): find a way to use the implicit histogram of the matchlist to leverage a patience sort technique
 pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRange> {
-    let mut n = left.len();
-    let mut m = right.len();
-    if n == 0 || m == 0 {
-        return vec![];
-    }
-    let prefix = common_prefix(left, right);
-    let mut matches = Vec::new();
-    if prefix > 0 {
-        matches.push(CommonRange {
-            left_start: 0,
-            right_start: 0,
-            length: prefix,
-        });
-        // Exact match or one sequence is a prefix of the other
-        if prefix == n || prefix == m {
+    let Trimmed {
+        left,
+        right,
+        mut matches,
+        prefix,
+        suffix,
+    } = match remove_suffixes_and_prefixes(left, right) {
+        Ok(matches) => {
             return matches;
         }
-    }
-    // wait to append the suffix matches until after the main loop
-    let suffix = common_suffix(left, right);
-    n -= suffix;
-    m -= suffix;
+        Err(t) => t,
+    };
 
-    let left = &left[prefix..n];
-    let right = &right[prefix..m];
-    n -= prefix;
-    m -= prefix;
+    let n = left.len();
+    let m = right.len();
+    debug_assert!((n > 1 && m > 0) || (n > 0 && m > 1), "n = {}, m = {}", n, m);
+
+    // At this point we know that the inputs are non-empty, at least one is longer than 1, and they have no common
+    // prefix or suffix.
+
     // drop Vec methods for extending and memory supporting it
     let mut thresh = vec![n; m + 1];
     thresh[0] = 0;

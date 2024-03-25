@@ -1,4 +1,4 @@
-use crate::token::Token;
+use crate::token::{CommonRange, Token};
 use std::mem::{transmute, MaybeUninit};
 
 /// Peforms a simple 'counting' sort on the token array, but returns the indices of the sorted token locations
@@ -29,7 +29,7 @@ pub fn counting_sort(arr: &[Token], max_token: usize) -> Vec<usize> {
 }
 
 /// Returns the length of the common prefix of `a` and `b`
-pub fn common_prefix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
+fn common_prefix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
     let mut i = 0;
     while i < a.len() && i < b.len() && a[i] == b[i] {
         i += 1;
@@ -38,7 +38,7 @@ pub fn common_prefix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
 }
 
 // Returns the length of the common suffix of `a` and `b`
-pub fn common_suffix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
+fn common_suffix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
     let n = a.len();
     let m = b.len();
     let limit = std::cmp::min(n, m);
@@ -47,6 +47,66 @@ pub fn common_suffix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
         i += 1;
     }
     i
+}
+
+pub struct Trimmed<'a> {
+    pub left: &'a [Token],
+    pub right: &'a [Token],
+    pub prefix: usize,
+    pub suffix: usize,
+    pub matches: Vec<CommonRange>,
+}
+
+/// Removes the common prefixes and suffixes
+///
+/// If the common prefixes and suffixes account for the full set of common ranges, just return them.
+/// Otherwise return the remaining ranges and the length of the common prefix and suffix.
+pub fn remove_suffixes_and_prefixes<'a>(
+    left: &'a [Token],
+    right: &'a [Token],
+) -> Result<Vec<CommonRange>, Trimmed<'a>> {
+    let mut n = left.len();
+    let mut m = right.len();
+    if n == 0 || m == 0 {
+        return Ok(Vec::<CommonRange>::new());
+    }
+    let prefix = common_prefix(left, right);
+    let mut matches = Vec::new();
+    if prefix > 0 {
+        matches.push(CommonRange {
+            left_start: 0,
+            right_start: 0,
+            length: prefix,
+        });
+        // Exact match or one sequence is a prefix of the other
+        if prefix == n || prefix == m {
+            return Ok(matches);
+        }
+    }
+    // wait to append the suffix matches until after the main loop
+    let suffix = common_suffix(left, right);
+    let left = &left[prefix..n - suffix];
+    let right = &right[prefix..m - suffix];
+    n = left.len();
+    m = right.len();
+    // If the suffix reduces inputs to <=1 we are done
+    if n <= 1 || m <= 1 {
+        if suffix > 0 {
+            matches.push(CommonRange {
+                left_start: n + prefix,
+                right_start: m + prefix,
+                length: suffix,
+            });
+        }
+        return Ok(matches);
+    }
+    Err(Trimmed {
+        left,
+        right,
+        matches,
+        prefix,
+        suffix,
+    })
 }
 
 /// A branchfree implementation of binary search over a subrange
