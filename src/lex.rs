@@ -72,6 +72,15 @@ pub fn fallback_lexer(tokens: &mut Tokens, contents: &[u8]) -> io::Result<Parsed
     })
 }
 
+/// A lexer that is mostly useful for tests
+pub fn lex_characters(tokens: &mut Tokens, s: &str) -> Vec<Token> {
+    let mut toks = Vec::with_capacity(s.len());
+    s.chars().for_each(|c| {
+        toks.push(tokens.get_token(vec![c as u8]));
+    });
+    toks
+}
+
 #[derive(Debug, Eq, PartialEq)]
 enum CharClass {
     Word,

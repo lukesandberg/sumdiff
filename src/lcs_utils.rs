@@ -89,8 +89,8 @@ pub fn remove_suffixes_and_prefixes<'a>(
     let right = &right[prefix..m - suffix];
     n = left.len();
     m = right.len();
-    // If the suffix reduces inputs to <=1 we are done
-    if n <= 1 || m <= 1 {
+    // If the suffix reduces both inputs to <=1 we are done since we have already compared prefixes and suffixes
+    if n <= 1 && m <= 1 || n == 0 || m == 0 {
         if suffix > 0 {
             matches.push(CommonRange {
                 left_start: n + prefix,
@@ -114,6 +114,7 @@ pub fn remove_suffixes_and_prefixes<'a>(
 ///
 /// For our usecase this significantly outperforms the standard library binary search.
 fn binary_search_range(arr: &[usize], offset: usize, end: usize, x: usize) -> usize {
+    debug_assert!(offset < end && end <= arr.len() && offset < arr.len());
     let mut low = offset;
     let mut size = end - low;
     // The loop condition is easy to predict but the comparison within the
@@ -141,24 +142,108 @@ fn binary_search_range(arr: &[usize], offset: usize, end: usize, x: usize) -> us
 ///
 /// Exponential search is a good fit for our use case because it is very efficient when the target is expected to be near the beginning of the array.
 pub fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usize) -> usize {
+    debug_assert!(offset < end && end <= arr.len() && offset < arr.len());
     let mut bound = 1;
     let mut probe = offset + bound;
     while probe < end && unsafe { *arr.get_unchecked(probe) } < x {
         bound *= 2;
         probe = offset + bound;
     }
-    binary_search_range(
+    let r = binary_search_range(
         arr,
         // start at the previous search location which we know is <=x
         offset + bound / 2,
         // end needs to be at most the size of the array or one past the last test which is >= x
         std::cmp::min(end, probe + 1),
         x,
-    )
+    );
+    debug_assert!(
+        /* past the end */
+        (r == end && arr[r - 1] < x)
+        || /* before the beginning */ (r == offset && arr[r] >= x)
+        || /* in the middle */ (arr[r] >= x && (r+1 == end || arr[r + 1] > x)),
+        "offset={}, end={}, x={}, r={}, arr={:?}",
+        offset,
+        end,
+        x,
+        r,
+        &arr[offset..end]
+    );
+    r
+}
+
+/// The trivial N^2 recurrence
+fn naive_lcs_length(a: &Vec<Token>, b: &Vec<Token>) -> usize {
+    let n = a.len();
+    let m = b.len();
+    let mut cur = vec![0; m + 1];
+    let mut prev = vec![0; m + 1];
+    for i in 1..=n {
+        for j in 1..=m {
+            if a[i - 1] == b[j - 1] {
+                cur[j] = prev[j - 1] + 1;
+            } else {
+                cur[j] = std::cmp::max(prev[j], cur[j - 1]);
+            }
+        }
+        // swap rows
+        let tmp = prev;
+        prev = cur;
+        cur = tmp;
+    }
+    prev[b.len()]
+}
+
+#[must_use]
+fn check_is_common_subsequence(
+    lcs: &Vec<(usize, usize)>,
+    left: &Vec<Token>,
+    right: &Vec<Token>,
+) -> Result<(), String> {
+    let mut prev = None;
+    for (l, r) in lcs {
+        if let Some((pl, pr)) = prev {
+            if pl >= *l || pr >= *r {
+                return Err(format!(
+                    "LCS sequence should be strictly increasing: ({}, {}) followed by ({}, {})",
+                    pl, pr, l, r
+                ));
+            }
+        }
+        if left[*l] != right[*r] {
+            return Err(format!(
+                "LCS sequence should be a common subsequence: (left[{}] = {}, right[{}] = {})",
+                l, left[*l], r, right[*r]
+            ));
+        }
+        prev = Some((*l, *r));
+    }
+    Ok(())
+}
+
+/// Validate an LCS
+#[must_use]
+pub fn check_is_lcs(
+    lcs: &Vec<(usize, usize)>,
+    left: &Vec<Token>,
+    right: &Vec<Token>,
+) -> Result<(), String> {
+    let expected_length = naive_lcs_length(left, right);
+    if expected_length != lcs.len() {
+        return Err(format!(
+            "Expected length {} but got {}",
+            expected_length,
+            lcs.len()
+        ));
+    }
+    check_is_common_subsequence(lcs, left, right)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::token::Tokens;
+
     use super::*;
 
     #[test]
@@ -208,5 +293,25 @@ mod tests {
         assert_eq!(exponential_search_range(&arr, 0, arr.len(), 5), 5);
         assert_eq!(exponential_search_range(&arr, 0, arr.len(), 9), 9);
         assert_eq!(exponential_search_range(&arr, 0, arr.len(), 10), 10);
+
+        // subrange tests
+        assert_eq!(exponential_search_range(&arr, 1, 2, 0), 1);
+        assert_eq!(exponential_search_range(&arr, 1, 2, 1), 1);
+        assert_eq!(exponential_search_range(&arr, 1, 2, 2), 2);
+        assert_eq!(exponential_search_range(&arr, 1, 2, 3), 2);
+    }
+
+    #[test]
+    fn test_naive_lsc_length() {
+        let mut tokens = Tokens::new();
+        let a = tokens.get_token(b"a".to_vec());
+        let b = tokens.get_token(b"b".to_vec());
+        let c = tokens.get_token(b"c".to_vec());
+        let d = tokens.get_token(b"d".to_vec());
+        assert_eq!(naive_lcs_length(&vec![a, b, c], &vec![b, a, c]), 2);
+        assert_eq!(
+            naive_lcs_length(&vec![a, b, a, c, a, d], &vec![b, a, c, a, d, a]),
+            5
+        );
     }
 }

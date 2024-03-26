@@ -110,13 +110,16 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
 
     let n = left.len();
     let m = right.len();
-    debug_assert!((n > 1 && m > 0) || (n > 0 && m > 1), "n = {}, m = {}", n, m);
-
     // At this point we know that the inputs are non-empty, at least one is longer than 1, and they have no common
     // prefix or suffix.
+    debug_assert!((n > 1 && m > 0) || (n > 0 && m > 1), "n = {}, m = {}", n, m);
 
+    // Thresh stores indexes of right where we could advance the LCS.  To simplify some comparisons we
+    // Initialize it with m+1 so all values are greater than any index of right, and we make it as
+    // long as the longest possible LCS.  Furthermore we initialize `thresh[0]=0` and use 1 based indexing
+    // into right to resolve some fencepost issues.
     // drop Vec methods for extending and memory supporting it
-    let mut thresh = vec![n; m + 1];
+    let mut thresh = vec![m + 1; std::cmp::min(n, m) + 1].into_boxed_slice();
     thresh[0] = 0;
     let matchlist = MatchList::build(tokens, left, right);
     // TODO: justify capacities
@@ -130,12 +133,11 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
     });
     let mut links: Vec<usize> = vec![0; m + 1];
     let mut max_thresh = 1;
-    for i in 0..n {
-        let range = &matchlist.matches[i];
-        let matches = &matchlist.right_indices[range.0..range.1];
-        if matches.is_empty() {
+    for (i, range) in matchlist.matches.iter().enumerate() {
+        if range.0 == range.1 {
             continue;
         }
+        let matches = &matchlist.right_indices[range.0..range.1];
         let mut k = 0;
         // These two fields serve as a tiny buffer to delay writes to the links array
         let mut r = 0;
@@ -144,33 +146,49 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
         // This also reserves the 0th entry for the dummy value above and simplifies read-out.
         let mut j = matches[mi];
         loop {
-            k = exponential_search_range(&thresh, k, max_thresh, j);
-            let prev_thresh = thresh[k];
-            thresh[k] = j;
-            max_thresh = std::cmp::max(max_thresh, k + 1);
-            let prev = links[k - 1];
-            links[r] = c;
-            r = k;
-            let prev_link = link_pool.get_mut(prev).unwrap();
-            // Check if we are simply extending a previous match.
-            if prev_link.i + prev_link.len == i && prev_link.j + prev_link.len == j - 1 {
-                prev_link.len += 1;
-                c = prev;
-            } else {
-                c = link_pool.len();
-                // This is the most expensive thing in the loop, extending the link pool is costly.
-                // What we want to know is when it is safe to reuse a prior link.
-                link_pool.push(DMatch {
-                    i,
-                    j: j - 1,
-                    prev,
-                    len: 1,
-                });
+            let new_k = exponential_search_range(&thresh, k, max_thresh, j);
+            debug_assert!(
+                thresh[new_k - 1] < j && thresh[new_k] >= j,
+                "new_k={}, j={}, thresh[{}..{}]={:?}",
+                new_k,
+                j,
+                k,
+                max_thresh + 1,
+                &thresh[k..max_thresh + 1]
+            );
+            let prev_thresh = thresh[new_k];
+            k = new_k;
+            // Only add a match if we are strictly decreasing the threshold
+            if j < prev_thresh {
+                thresh[new_k] = j;
+                max_thresh = std::cmp::max(max_thresh, k + 1);
+                let prev = links[k - 1];
+                links[r] = c;
+                r = k;
+                let prev_link = link_pool.get_mut(prev).unwrap();
+                // Check if we are simply extending a previous match.
+                if prev_link.i + prev_link.len == i && prev_link.j + prev_link.len == j - 1 {
+                    prev_link.len += 1;
+                    c = prev;
+                } else {
+                    c = link_pool.len();
+                    // This is the most expensive thing in the loop, extending the link pool is costly.
+                    // What we want to know is when it is safe to reuse a prior link.
+                    link_pool.push(DMatch {
+                        i,
+                        j: j - 1,
+                        prev,
+                        len: 1,
+                    });
+                }
             }
             // Search for the next match index, greater than this one and smaller than the previous threshold
             // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
             // at indexes greater than k are strictly greater than prev_thresh
             mi += 1;
+            if mi >= matches.len() {
+                break;
+            }
             mi = exponential_search_range(matches, mi, matches.len(), prev_thresh + 1);
             if mi >= matches.len() {
                 break;
@@ -232,16 +250,67 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
 
 #[cfg(test)]
 mod tests {
+    use crate::{lcs_utils::check_is_lcs, lex::lex_characters};
+
     use super::*;
 
     #[test]
     fn test_build_matchlist() {
         let mut tokens = Tokens::new();
-        let a = tokens.get_token(b"a".to_vec());
-        let b = tokens.get_token(b"b".to_vec());
-        let c = tokens.get_token(b"c".to_vec());
-        let d = tokens.get_token(b"d".to_vec());
-        let matchlist = MatchList::build(&tokens, &vec![a, b, c], &vec![b, c, c, d]);
+        let abc = lex_characters(&mut tokens, "abc");
+        let bccd = lex_characters(&mut tokens, "bccd");
+        let matchlist = MatchList::build(&tokens, &abc, &bccd);
         assert_eq!(matchlist.matches, vec![(0, 0), (0, 1), (1, 3)]);
+    }
+
+    #[test]
+    fn test_kc_lcs() {
+        let mut tokens = Tokens::new();
+
+        let abc = lex_characters(&mut tokens, "abc");
+        let bac = lex_characters(&mut tokens, "bac");
+        let lcs = CommonRange::flatten(&kc_lcs(&tokens, &abc, &bac));
+        assert_eq!(lcs, vec![(1, 0), (2, 2)]);
+
+        let abacad = lex_characters(&mut tokens, "abacad");
+        let bacada = lex_characters(&mut tokens, "bacada");
+        let lcs = CommonRange::flatten(&kc_lcs(&tokens, &abacad, &bacada));
+        assert_eq!(lcs, vec![(1, 0), (2, 1), (3, 2), (4, 3), (5, 4)]);
+    }
+
+    #[test]
+    fn test_kc_not_subsequence() {
+        let mut tokens = Tokens::new();
+        let left = ["22", "15", "19", "15", "25", "25"]
+            .iter()
+            .map(|s| tokens.get_token(s.as_bytes().to_vec()))
+            .collect::<Vec<Token>>();
+        let right = ["26", "15", "30", "15", "25", "28"]
+            .iter()
+            .map(|s| tokens.get_token(s.as_bytes().to_vec()))
+            .collect::<Vec<Token>>();
+        let kc = CommonRange::flatten(&kc_lcs(&tokens, &left, &right));
+        check_is_lcs(&kc, &left, &right).unwrap();
+    }
+
+    /// This test triggered a fencepost error in the prefix/suffix logic.
+    #[test]
+    fn test_kc_buggy_suffix_logic() {
+        let mut tokens = Tokens::new();
+
+        let left = lex_characters(&mut tokens, "aba");
+        let right = lex_characters(&mut tokens, "b");
+        let kc = CommonRange::flatten(&kc_lcs(&tokens, &left, &right));
+        check_is_lcs(&kc, &left, &right).unwrap();
+    }
+
+    #[test]
+    fn test_kc_buggy_thresh_update() {
+        let mut tokens = Tokens::new();
+
+        let left = lex_characters(&mut tokens, "b");
+        let right = lex_characters(&mut tokens, "aba");
+        let kc = CommonRange::flatten(&kc_lcs(&tokens, &left, &right));
+        check_is_lcs(&kc, &left, &right).unwrap();
     }
 }
