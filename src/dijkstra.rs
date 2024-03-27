@@ -17,7 +17,6 @@ is O(NM) in size.  We need to take advantage of inherent structure in the edit g
 To do that in this case would involve things like:
  - aggressively following 'snakes' (diagonals) in the graph where the two substrings are aligned.
  - improving boundary conditions to prune unproductive paths (this is more or less A* search)
- - adopt a fibonnaci heap to decrease heap size and improve performance
  - use a more efficient encoding of the predecessor path (e.g. we only really need to store non matches)
 
 The above are all more or less the insights of the meyers algorithm. Still dijkstra is fundamentally easier
@@ -37,13 +36,109 @@ use crate::token::{CommonRange, Token};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::VecDeque;
-
-type Vertex = (usize, usize);
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, Copy)]
-struct NodeMeta {
-    pred: Vertex,
+enum Pred {
+    CommonBegin(usize),
+    CommonEnd(usize),
+    None,
+}
+
+impl Pred {
+    fn for_next(&self, i: usize) -> Pred {
+        match self {
+            // If node is the end of a common sequence, then we are branching so set our pred as the
+            // common end of that sequence
+            Pred::CommonBegin(_) => Pred::CommonEnd(i),
+            // If node is pointing at the end of a common sequence point there as well.
+            Pred::CommonEnd(pe) => Pred::CommonEnd(*pe),
+            // If we are pointing at the origin, then there is just some sequence of inserts and deletes
+            Pred::None => Pred::None,
+        }
+    }
+}
+
+struct Vertex {
+    left: usize,
+    right: usize,
     distance: u32,
+    pred: Pred,
+}
+
+impl Hash for Vertex {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.left.hash(state);
+        self.right.hash(state);
+    }
+}
+impl PartialEq for Vertex {
+    fn eq(&self, other: &Self) -> bool {
+        self.left == other.left && self.right == other.right
+    }
+}
+impl Eq for Vertex {}
+
+struct NodePool {
+    pool: Vec<Vertex>,
+    index: HashMap<(usize, usize), usize>,
+    max_distance: u32,
+}
+
+impl NodePool {
+    fn new(n: usize, m: usize) -> Self {
+        let mut pool = Vec::with_capacity(n + m);
+        let mut index = HashMap::with_capacity(n + m);
+        pool.push(Vertex {
+            left: 0,
+            right: 0,
+            distance: 0,
+            pred: Pred::None,
+        });
+        index.insert((0, 0), 0);
+        let max_distance: u32 = (n + m + 1).try_into().unwrap();
+        pool.push(Vertex {
+            left: n,
+            right: m,
+            distance: max_distance,
+            pred: Pred::None,
+        });
+        index.insert((n, m), 1);
+        NodePool {
+            pool,
+            index,
+            max_distance,
+        }
+    }
+
+    fn dest(&self) -> &Vertex {
+        self.get_by_index(1)
+    }
+
+    fn get_by_index(&self, index: usize) -> &Vertex {
+        &self.pool[index]
+    }
+
+    fn get_or_insert(&mut self, vertex: (usize, usize)) -> (&mut Vertex, usize) {
+        match self.index.entry(vertex) {
+            Entry::Occupied(mut entry) => {
+                let index = entry.get_mut();
+                let vertex = &mut self.pool[*index];
+                (vertex, *index)
+            }
+            Entry::Vacant(entry) => {
+                let i = self.pool.len();
+                self.pool.push(Vertex {
+                    left: vertex.0,
+                    right: vertex.1,
+                    distance: self.max_distance,
+                    pred: Pred::None,
+                });
+                entry.insert(i);
+                (&mut self.pool[i], i)
+            }
+        }
+    }
 }
 
 /// Returns the neighbors of this NodeMeta in the edit graph.
@@ -56,61 +151,75 @@ struct NodeMeta {
 /// - else `(`x+1, y)`` with cost 1 and `(`x, y+1)`` with cost 1 meaning we either delete one token from a or or insert one token into b
 ///
 /// The special case is for the match, to reduce some overhead we follow the full diagonal.
-fn neighbors((start_l, start_r): Vertex, left: &[Token], right: &[Token]) -> Vec<(Vertex, u32)> {
+fn neighbors(start: &Vertex, left: &[Token], right: &[Token]) -> Vec<((usize, usize), bool)> {
     let n = left.len();
     let m = right.len();
-    if start_l == n || start_r == m {
+    let start_l = start.left;
+    let start_r = start.right;
+    if start_l == n {
         debug_assert!(
-            start_l != n || start_r != m,
+            start_r != m,
             "should never query neighbors of the end vertex"
         );
-        // We are at the end of one of the sequences, just jump to the end
-        // This is the one place that the distance is >1.  This might require a special case in the caller
-        return vec![((n, m), std::cmp::max(n - start_l, m - start_r) as u32)];
-    }
-    // follow the whole diagonal
-    // TODO: this operation can be optimized to O(1) using two suffix arrays
-    let mut l = start_l;
-    let mut r = start_r;
-    if left[l] == right[r] {
-        l += 1;
-        r += 1;
-        while l < n && r < m && left[l] == right[r] {
+        vec![((n, start_r + 1), false)]
+    } else if start_r == m {
+        vec![((start_l + 1, m), false)]
+    } else {
+        // follow the whole diagonal
+        // TODO: this operation can be optimized to O(1) using two suffix arrays
+        let mut l = start_l;
+        let mut r = start_r;
+        if left[l] == right[r] {
             l += 1;
             r += 1;
+            while l < n && r < m && left[l] == right[r] {
+                l += 1;
+                r += 1;
+            }
+            vec![((l, r), true)]
+        } else {
+            // only explore non diagonal if we can't advance on the diagonal
+            // Visit deletions and then insertions, for equivalent cost paths this will prioritize deletions
+            vec![
+                ((start_l + 1, start_r), false),
+                ((start_l, start_r + 1), false),
+            ]
         }
-        return vec![((l, r), 0)];
     }
-    // only explore non diagonal if we can't advance on the diagonal
-    // Visit deletions and then insertions, for equivalent cost paths this will prioritize deletions
-    vec![((start_l + 1, start_r), 1), ((start_l, start_r + 1), 1)]
 }
 
 fn recover_path<'a>(
-    mut vertex: Vertex,
-    mut node: &'a NodeMeta,
+    mut vertex: &'a Vertex,
     matches: &mut Vec<CommonRange>,
     prefix: usize,
-    pool: &'a HashMap<Vertex, NodeMeta>,
+    pool: &'a NodePool,
 ) {
-    while vertex != (0, 0) {
-        let pred_vertex = node.pred;
-        let left_delta = vertex.0 - pred_vertex.0;
-        let right_delta = vertex.1 - pred_vertex.1;
-        if left_delta == right_delta {
-            debug_assert!(left_delta == right_delta);
-            // This was a diagonal move
-            matches.push(CommonRange {
-                left_start: prefix + pred_vertex.0,
-                right_start: prefix + pred_vertex.1,
-                length: left_delta,
-            });
-        } else {
-            // This was a horizontal or vertical move
-            // TODO: find a way to avoid creating these NodeMetas
+    vertex = match vertex.pred {
+        Pred::None => {
+            return; // There were no matches, just stop
         }
-        vertex = pred_vertex;
-        node = &pool.get(&pred_vertex).unwrap();
+        Pred::CommonBegin(_) => unreachable!(), // The end node ends on a common sequence, this is impossible due to our suffix removal
+        Pred::CommonEnd(i) => pool.get_by_index(i),
+    };
+    while let Pred::CommonBegin(b) = vertex.pred {
+        let pred = pool.get_by_index(b);
+        let left_delta = vertex.left - pred.left;
+        let right_delta = vertex.right - pred.right;
+        debug_assert!(left_delta > 0 && right_delta == left_delta);
+        // This was a diagonal move, produce a range.
+        matches.push(CommonRange {
+            left_start: prefix + pred.left,
+            right_start: prefix + pred.right,
+            length: left_delta,
+        });
+
+        vertex = match pred.pred {
+            Pred::None => {
+                break; // There were no more matches, just stop
+            }
+            Pred::CommonBegin(_) => unreachable!(), // The end node ends on a common sequence, this is impossible due to our suffix removal
+            Pred::CommonEnd(i) => pool.get_by_index(i),
+        };
     }
     if prefix > 0 {
         matches[1..].reverse();
@@ -150,17 +259,7 @@ pub fn dijkstra(left: &[Token], right: &[Token]) -> Vec<CommonRange> {
     //     is only possible if we require that n and m are less than 2^32.  This would be a
     //     constant size optimization
     //
-    let mut pool: HashMap<Vertex, NodeMeta> = HashMap::with_capacity(n + m);
-
-    let origin = (0, 0);
-    pool.insert(
-        origin,
-        NodeMeta {
-            distance: 0,
-            pred: origin, // self link
-        },
-    );
-
+    let mut pool = NodePool::new(n, m);
     // This forms a simple 2 bucket bucket queue.
     // All the edges in our graph have a weight of 0 or 1, and dijkstra's algorithm is
     // monotonic meaning that having explored an NodeMeta at distance `d` we will never explore
@@ -168,88 +267,73 @@ pub fn dijkstra(left: &[Token], right: &[Token]) -> Vec<CommonRange> {
     // at the front and NodeMetas at distance 1 at the back.  This does change the order of
     // traversal, but it is still correct and gives us trivial O(1) insertions and deletions.
     // This is known as a bucket queue.
-    let mut h: VecDeque<Vertex> = VecDeque::with_capacity(n + m);
-    h.push_front(origin);
+    let mut h: VecDeque<usize> = VecDeque::with_capacity(n + m);
+    h.push_front(0);
+
     // Tracks the offset where the current nodes at relative distance zero end which
     // tells us when to increment `front_distance`.
     let mut num_front = 1;
-    let mut front_distance = 0;
+    let mut front_distance: u32 = 0;
 
-    let end_vertex = (n, m);
-    while !h.is_empty() {
+    let mut explored_points: usize = 0;
+    while let Some(i) = h.pop_front() {
         if num_front == 0 {
             // We have explored all the NodeMetas in the current frontier
             // We can now move to the next frontier
             num_front = h.len();
             front_distance += 1;
+        } else {
+            num_front -= 1;
         }
-        let vertex = h.pop_front().unwrap();
-
-        if vertex == end_vertex {
-            break;
-        }
-        let node = pool.get(&vertex).unwrap();
-        num_front -= 1;
+        debug_assert!(
+            front_distance as usize <= n + m,
+            "front_distance = {}, n = {}, m = {}",
+            front_distance,
+            n,
+            m
+        );
+        let node = pool.get_by_index(i);
         let nd = node.distance;
         if nd < front_distance {
-            // We found a shorter path to this NodeMeta.
+            // We already found a shorter path to this NodeMeta.
             continue;
         }
-
-        for (nv, edge_weight) in neighbors(vertex, left, right) {
-            let neighbor_distance = nd + edge_weight;
-            let updated = match pool.entry(nv) {
-                Entry::Occupied(mut entry) => {
-                    let cur = entry.get_mut();
-                    if cur.distance > neighbor_distance {
-                        cur.distance = neighbor_distance;
-                        cur.pred = vertex;
-                        // If we had an efficient mechanism it would be good to delete `nv` from the upcoming heap.
-                        // This would require tracking offsets in the NodeMeta structure and then deleting an entry
-                        // in our heap would be O(N).  Instead we detect the stale NodeMeta above when we compare the
-                        // NodeMeta distance to the `front` distance.
-                        true
-                    } else {
-                        false
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(NodeMeta {
-                        distance: neighbor_distance,
-                        pred: vertex,
-                    });
-                    true
-                }
-            };
-            if updated {
-                match edge_weight {
-                    0 => {
-                        h.push_front(nv);
+        let np = node.pred;
+        let nl = node.left;
+        let nr = node.right;
+        explored_points += 1;
+        if nl == n && nr == m {
+            break;
+        }
+        for (nv, is_match) in neighbors(node, left, right) {
+            let neighbor_distance = nd + if is_match { 0 } else { 1 };
+            let (neighbor, index) = pool.get_or_insert(nv);
+            if neighbor.distance > neighbor_distance {
+                neighbor.distance = neighbor_distance;
+                match is_match {
+                    true => {
+                        neighbor.pred = Pred::CommonBegin(i);
+                        h.push_front(index);
                         num_front += 1;
                     }
-                    1 => h.push_back(nv),
-                    _ => {
-                        // This happens on a 'jump' to the end.
-                        debug_assert!((n, m) == nv);
-                        // In this case we don't update the heap since there are no neighbors to explore
-                        // and we know it is larger than everything else.  The pool is already updated with the
-                        // distance and predecessor.
+                    false => {
+                        neighbor.pred = np.for_next(i);
+                        h.push_back(index);
                     }
                 }
             }
         }
     }
 
-    let end = match pool.get(&end_vertex) {
-        Some(end) => end,
-        None => {
-            panic!(
-                "Should have found a path to the end. left={:?} right={:?}",
-                left, right
-            );
-        }
+    let end = pool.dest();
+    if end.distance as usize > n + m {
+        panic!(
+            "Should have found a path to the end. left={:?} right={:?}",
+            left, right
+        );
     };
-    recover_path(end_vertex, &end, &mut matches, prefix, &pool);
+    debug_assert!(explored_points <= (n + m) * end.distance as usize);
+    recover_path(end, &mut matches, prefix, &pool);
     if suffix > 0 {
         matches.push(CommonRange {
             left_start: prefix + n,
@@ -257,7 +341,7 @@ pub fn dijkstra(left: &[Token], right: &[Token]) -> Vec<CommonRange> {
             length: suffix,
         });
     }
-    return matches;
+    matches
 }
 
 #[cfg(test)]
@@ -299,6 +383,16 @@ mod tests {
             .collect::<Vec<Token>>();
         let lcs = CommonRange::flatten(&dijkstra(&left, &right));
         check_is_lcs(&lcs, &left, &right).unwrap();
-        assert_eq!(lcs, vec![(1, 1), (2, 4)]);
+        assert_eq!(lcs, vec![(1, 1), (3, 3)]);
+    }
+
+    #[test]
+    fn test_diagonal_crash() {
+        let mut tokens = Tokens::new();
+        let left = lex_characters(&mut tokens, "abcbd");
+        let right = lex_characters(&mut tokens, "dabcddb");
+        let lcs = CommonRange::flatten(&dijkstra(&left, &right));
+        check_is_lcs(&lcs, &left, &right).unwrap();
+        assert_eq!(lcs, vec![(0, 1), (1, 2), (2, 3), (4, 4)]);
     }
 }

@@ -173,7 +173,7 @@ pub fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usi
 }
 
 /// The trivial N^2 recurrence
-fn naive_lcs_length(a: &Vec<Token>, b: &Vec<Token>) -> usize {
+fn naive_lcs_length(a: &[Token], b: &[Token]) -> usize {
     let n = a.len();
     let m = b.len();
     let mut cur = vec![0; m + 1];
@@ -187,18 +187,15 @@ fn naive_lcs_length(a: &Vec<Token>, b: &Vec<Token>) -> usize {
             }
         }
         // swap rows
-        let tmp = prev;
-        prev = cur;
-        cur = tmp;
+        std::mem::swap(&mut prev, &mut cur);
     }
     prev[b.len()]
 }
 
-#[must_use]
 fn check_is_common_subsequence(
-    lcs: &Vec<(usize, usize)>,
-    left: &Vec<Token>,
-    right: &Vec<Token>,
+    lcs: &[(usize, usize)],
+    left: &[Token],
+    right: &[Token],
 ) -> Result<(), String> {
     let mut prev = None;
     for (l, r) in lcs {
@@ -222,12 +219,7 @@ fn check_is_common_subsequence(
 }
 
 /// Validate an LCS
-#[must_use]
-pub fn check_is_lcs(
-    lcs: &Vec<(usize, usize)>,
-    left: &Vec<Token>,
-    right: &Vec<Token>,
-) -> Result<(), String> {
+pub fn check_is_lcs(lcs: &[(usize, usize)], left: &[Token], right: &[Token]) -> Result<(), String> {
     let expected_length = naive_lcs_length(left, right);
     if expected_length != lcs.len() {
         return Err(format!(

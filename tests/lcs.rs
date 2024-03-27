@@ -1,4 +1,3 @@
-use rand::{thread_rng, Rng};
 use sumdifflib::{
     dijkstra::dijkstra,
     kc::kc_lcs,
@@ -77,6 +76,7 @@ fn lex_nums(tokens: &mut Tokens, s: &[u8]) -> Vec<Token> {
 
     toks
 }
+
 #[quickcheck]
 fn quickcheck_kc(left: Vec<u8>, right: Vec<u8>) -> bool {
     let mut tokens = Tokens::new();
@@ -85,6 +85,7 @@ fn quickcheck_kc(left: Vec<u8>, right: Vec<u8>) -> bool {
     let kc_lcs = CommonRange::flatten(&kc_lcs(&tokens, &left_toks, &right_toks));
     check_is_lcs(&kc_lcs, &left_toks, &right_toks).is_ok()
 }
+
 #[quickcheck]
 fn quickcheck_dijktra(left: Vec<u8>, right: Vec<u8>) -> bool {
     let mut tokens = Tokens::new();
@@ -92,64 +93,4 @@ fn quickcheck_dijktra(left: Vec<u8>, right: Vec<u8>) -> bool {
     let right_toks = lex_nums(&mut tokens, &right);
     let dijkstra_lcs = CommonRange::flatten(&dijkstra(&left_toks, &right_toks));
     check_is_lcs(&dijkstra_lcs, &left_toks, &right_toks).is_ok()
-}
-
-const SIZE: &[usize] = &[10, 20, 64];
-
-#[derive(Debug)]
-enum EditSize {
-    Small,
-    Medium,
-    Large,
-}
-
-#[test]
-fn lcs_benchmark() {
-    for edit_size in [EditSize::Small, EditSize::Medium, EditSize::Large].iter() {
-        for &size in SIZE {
-            let mut tokens = Tokens::new();
-            let token_universe = (0..size / 2)
-                .map(|v: usize| tokens.get_token(v.to_string().into_bytes()))
-                .collect::<Vec<Token>>();
-
-            let mut rnd = thread_rng();
-            let dist = rand::distributions::WeightedIndex::new(
-                (1..=size / 2)
-                    .map(|i| std::cmp::max(1, (size / 2) * (i / 10)))
-                    .collect::<Vec<usize>>(),
-            )
-            .unwrap();
-            let left = (0..size)
-                .map(|_| token_universe[rnd.sample(&dist)])
-                .collect::<Vec<Token>>();
-            let mut right = left.clone();
-            match edit_size {
-                EditSize::Small => {
-                    // edit 1% of the tokens
-                    for _ in 0..std::cmp::max(1, size / 100) {
-                        let idx = rnd.gen_range(0..size);
-                        right[idx] = token_universe[rnd.sample(&dist)];
-                    }
-                }
-                EditSize::Medium => {
-                    // edit 5% of the tokens
-                    for _ in 0..std::cmp::max(1, size / 20) {
-                        let idx = rnd.gen_range(0..size);
-                        right[idx] = token_universe[rnd.sample(&dist)];
-                    }
-                }
-                EditSize::Large => {
-                    // edit 10% of the tokens
-                    for _ in 0..std::cmp::max(1, size / 10) {
-                        let idx = rnd.gen_range(0..size);
-                        right[idx] = token_universe[rnd.sample(&dist)];
-                    }
-                }
-            }
-            let kc_lcs = CommonRange::flatten(&kc_lcs(&tokens, &left, &right));
-            check_is_lcs(&kc_lcs, &left, &right).unwrap();
-            let dijkstra_lcs = CommonRange::flatten(&dijkstra(&left, &right));
-            check_is_lcs(&dijkstra_lcs, &left, &right).unwrap();
-        }
-    }
 }
