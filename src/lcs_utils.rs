@@ -176,20 +176,23 @@ pub fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usi
 pub fn naive_lcs_length(a: &[Token], b: &[Token]) -> usize {
     let n = a.len();
     let m = b.len();
-    let mut cur = vec![0; m + 1];
-    let mut prev = vec![0; m + 1];
+    let mut row = vec![0; m + 1];
     for i in 1..=n {
+        // Since we are only ever looking back 1 we can get away with
+        // a single element cache to store the previous row value at j-1
+        // before we overwrite it.
+        let mut prev_row_at_j_minus_one = 0;
         for j in 1..=m {
+            let prev_row_at_j = row[j];
             if a[i - 1] == b[j - 1] {
-                cur[j] = prev[j - 1] + 1;
+                row[j] = prev_row_at_j_minus_one + 1;
             } else {
-                cur[j] = std::cmp::max(prev[j], cur[j - 1]);
+                row[j] = std::cmp::max(prev_row_at_j, row[j - 1]);
             }
+            prev_row_at_j_minus_one = prev_row_at_j;
         }
-        // swap rows
-        std::mem::swap(&mut prev, &mut cur);
     }
-    prev[b.len()]
+    row[b.len()]
 }
 
 fn check_is_common_subsequence(
