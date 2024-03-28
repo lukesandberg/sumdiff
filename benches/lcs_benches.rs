@@ -63,11 +63,14 @@ fn lcs_benchmark(c: &mut Criterion) {
                     kc_lcs(&tokens, &left, &right);
                 });
             });
-            group.bench_function("dijkstra", |b| {
-                b.iter(|| {
-                    dijkstra(&left, &right);
+            if size <= SIZE[0] {
+                // dijkstra is way too slow for large inputs
+                group.bench_function("dijkstra", |b| {
+                    b.iter(|| {
+                        dijkstra(&left, &right);
+                    });
                 });
-            });
+            }
         }
     }
 }
