@@ -7,7 +7,7 @@ use sumdifflib::{
     token::{Token, Tokens},
 };
 
-const SIZE: &[usize] = &[1024, 65536, 1024 * 1024];
+const SIZE: &[usize] = &[1024, 4096, 4096 * 4];
 
 #[derive(Debug)]
 enum EditSize {
@@ -93,6 +93,7 @@ fn lcs_benchmark(c: &mut Criterion) {
                         alphabet_size, edit_size, size
                     ));
                     group.throughput(criterion::Throughput::Elements(size as u64));
+                    group.sample_size(if size_index == 0 { 100 } else { 10 });
                     group.bench_function("kc", |b| {
                         b.iter(|| {
                             kc_lcs(&tokens, &left, &right);
@@ -114,6 +115,7 @@ fn lcs_benchmark(c: &mut Criterion) {
                         alphabet_size, edit_size, size
                     ));
                     group.throughput(criterion::Throughput::Elements(size as u64));
+                    group.sample_size(if size_index == 0 { 100 } else { 10 });
                     if size_index == 0 {
                         // The naive algorithm is too slow for large inputs
                         group.bench_function("naive", |b| {
