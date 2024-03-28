@@ -217,7 +217,7 @@ fn recover_path<'a>(
             Pred::None => {
                 break; // There were no more matches, just stop
             }
-            Pred::CommonBegin(_) => unreachable!(), // The end node ends on a common sequence, this is impossible due to our suffix removal
+            Pred::CommonBegin(_) => unreachable!(), // A begin can point at a begin
             Pred::CommonEnd(i) => pool.get_by_index(i),
         };
     }
@@ -298,13 +298,13 @@ pub fn dijkstra(left: &[Token], right: &[Token]) -> Vec<CommonRange> {
             // We already found a shorter path to this NodeMeta.
             continue;
         }
-        let np = node.pred;
         let nl = node.left;
         let nr = node.right;
         explored_points += 1;
         if nl == n && nr == m {
             break;
         }
+        let np = node.pred;
         for (nv, is_match) in neighbors(node, left, right) {
             let neighbor_distance = nd + if is_match { 0 } else { 1 };
             let (neighbor, index) = pool.get_or_insert(nv);

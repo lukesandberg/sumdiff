@@ -173,7 +173,7 @@ pub fn exponential_search_range(arr: &[usize], offset: usize, end: usize, x: usi
 }
 
 /// The trivial N^2 recurrence
-fn naive_lcs_length(a: &[Token], b: &[Token]) -> usize {
+pub fn naive_lcs_length(a: &[Token], b: &[Token]) -> usize {
     let n = a.len();
     let m = b.len();
     let mut cur = vec![0; m + 1];
@@ -219,6 +219,8 @@ fn check_is_common_subsequence(
 }
 
 /// Validate an LCS
+/// - The length should be the same as the naive LCS length
+/// - The LCS should be a common subsequence
 pub fn check_is_lcs(lcs: &[(usize, usize)], left: &[Token], right: &[Token]) -> Result<(), String> {
     let expected_length = naive_lcs_length(left, right);
     if expected_length != lcs.len() {

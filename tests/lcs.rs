@@ -1,8 +1,9 @@
 use sumdifflib::{
     dijkstra::dijkstra,
     kc::kc_lcs,
-    lcs_utils::check_is_lcs,
+    lcs_utils::{check_is_lcs, naive_lcs_length},
     lex::lex_characters,
+    meyers::meyers_lcs_length,
     token::{CommonRange, Token, Tokens},
 };
 #[cfg(test)]
@@ -26,6 +27,8 @@ fn do_lcs_test(test: LcsTest) {
     check_is_lcs(&kc_lcs, &left_toks, &right_toks).unwrap();
     let dijkstra_lcs = CommonRange::flatten(&dijkstra(&left_toks, &right_toks));
     check_is_lcs(&dijkstra_lcs, &left_toks, &right_toks).unwrap();
+    let meyers_length = meyers_lcs_length(&left_toks, &right_toks);
+    assert_eq!(meyers_length, kc_lcs.len());
     match test.length {
         Some(len) => {
             assert_eq!(kc_lcs.len(), len);
@@ -68,6 +71,7 @@ lcs_test! {
     only_prefix: LcsTest{left: "ab", right: "ac", length: Some(1), value: Some(vec![(0, 0)])},
     middle_run: LcsTest{left: "abba", right: "cbbc", length: Some(2), value: Some(vec![(1, 1), (2, 2)])},
 }
+
 fn lex_nums(tokens: &mut Tokens, s: &[u8]) -> Vec<Token> {
     let mut toks = Vec::with_capacity(s.len());
     s.iter().for_each(|&c| {
@@ -93,4 +97,13 @@ fn quickcheck_dijktra(left: Vec<u8>, right: Vec<u8>) -> bool {
     let right_toks = lex_nums(&mut tokens, &right);
     let dijkstra_lcs = CommonRange::flatten(&dijkstra(&left_toks, &right_toks));
     check_is_lcs(&dijkstra_lcs, &left_toks, &right_toks).is_ok()
+}
+
+#[quickcheck]
+fn quickcheck_meyers_length(left: Vec<u8>, right: Vec<u8>) -> bool {
+    let mut tokens = Tokens::new();
+    let left_toks = lex_nums(&mut tokens, &left);
+    let right_toks = lex_nums(&mut tokens, &right);
+    let length = meyers_lcs_length(&left_toks, &right_toks);
+    naive_lcs_length(&left_toks, &right_toks) == length
 }

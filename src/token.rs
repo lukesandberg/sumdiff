@@ -55,7 +55,7 @@ impl Tokens {
 
     /// Get the string for a token, used only for testing.
     /// This is an O(n) operation in the size of the universe and the tokens
-    pub fn get_token_images(&self, tokens: &Vec<Token>) -> Vec<String> {
+    pub fn get_token_images(&self, tokens: &[Token]) -> Vec<String> {
         let printer = self.printer();
 
         tokens

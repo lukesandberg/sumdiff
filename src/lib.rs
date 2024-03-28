@@ -5,4 +5,5 @@ pub mod hunk;
 pub mod kc;
 pub mod lcs_utils;
 pub mod lex;
+pub mod meyers;
 pub mod token;
