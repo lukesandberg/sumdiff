@@ -4,12 +4,13 @@ use sumdifflib::{
     dijkstra::dijkstra,
     kc::kc_lcs,
     lcs_utils::naive_lcs_length,
+    meyers::meyers_lcs_length,
     token::{Token, Tokens},
 };
 
-const SIZE: &[usize] = &[1024, 4096, 4096 * 4];
+const SIZE: &[usize] = &[1024, 2048, 4096, 8192, 16384];
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum EditSize {
     Small,
     Medium,
@@ -25,7 +26,7 @@ impl EditSize {
         let edit_size = match self {
             EditSize::Small => {
                 // edit 1% of the tokens
-                size / 10
+                size / 100
             }
             EditSize::Medium => {
                 // edit 5% of the tokens
@@ -44,7 +45,7 @@ impl EditSize {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum AlphabetSize {
     Small,
     Medium,
@@ -61,76 +62,95 @@ impl AlphabetSize {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Scenario {
+    left: Vec<Token>,
+    right: Vec<Token>,
+    edit_size: EditSize,
+    alphabet_size: AlphabetSize,
+    size: usize,
+}
+
+impl Scenario {
+    fn sample_size(&self) -> usize {
+        if self.size <= 1024 {
+            100
+        } else {
+            10
+        }
+    }
+}
+
 fn lcs_benchmark(c: &mut Criterion) {
-    for (size_index, &size) in SIZE.iter().enumerate() {
-        for alphabet_size in [
-            AlphabetSize::Small,
-            AlphabetSize::Medium,
-            AlphabetSize::Large,
-        ]
-        .iter()
-        {
-            let mut tokens = Tokens::new();
-            let alpha_size = alphabet_size.size();
-            let token_universe = (0..alpha_size)
-                .map(|v: usize| tokens.get_token(v.to_string().into_bytes()))
-                .collect::<Vec<Token>>();
-            let mut rnd = thread_rng();
-            let dist = rand::distributions::WeightedIndex::new(
-                (1..=alpha_size)
-                    .map(|i| std::cmp::max(1, alpha_size * (i / 10)))
-                    .collect::<Vec<usize>>(),
-            )
-            .unwrap();
-            let left = (0..size)
-                .map(|_| token_universe[rnd.sample(&dist)])
-                .collect::<Vec<Token>>();
-            for edit_size in [EditSize::Small, EditSize::Medium, EditSize::Large].iter() {
+    for alphabet_size in [
+        AlphabetSize::Small,
+        AlphabetSize::Medium,
+        AlphabetSize::Large,
+    ]
+    .iter()
+    {
+        let mut tokens = Tokens::new();
+        let alpha_size = alphabet_size.size();
+        let token_universe = (0..alpha_size)
+            .map(|v: usize| tokens.get_token(v.to_string().into_bytes()))
+            .collect::<Vec<Token>>();
+        let mut rnd = thread_rng();
+        let dist = rand::distributions::WeightedIndex::new(
+            (1..=alpha_size)
+                .map(|i| std::cmp::max(1, alpha_size * (i / 10)))
+                .collect::<Vec<usize>>(),
+        )
+        .unwrap();
+        for edit_size in [EditSize::Small, EditSize::Medium, EditSize::Large].iter() {
+            let mut scenarios = Vec::new();
+            for &size in SIZE {
+                let left = (0..size)
+                    .map(|_| token_universe[rnd.sample(&dist)])
+                    .collect::<Vec<Token>>();
                 let right = edit_size.edit(&left);
-                {
-                    let mut group = c.benchmark_group(format!(
-                        "lcs/alpha:{:?}/edit:{:?}/{:?}",
-                        alphabet_size, edit_size, size
-                    ));
-                    group.throughput(criterion::Throughput::Elements(size as u64));
-                    group.sample_size(if size_index == 0 { 100 } else { 10 });
+                scenarios.push(Scenario {
+                    left: left.clone(),
+                    right,
+                    edit_size: *edit_size,
+                    alphabet_size: *alphabet_size,
+                    size,
+                });
+            }
+
+            {
+                let mut group = c.benchmark_group(format!(
+                    "lcs/alpha:{:?}/edit:{:?}",
+                    alphabet_size, edit_size
+                ));
+                for scenario in scenarios {
+                    group.throughput(criterion::Throughput::Elements(scenario.size as u64));
+                    group.sample_size(scenario.sample_size());
                     group.bench_function("kc", |b| {
                         b.iter(|| {
-                            kc_lcs(&tokens, &left, &right);
+                            kc_lcs(&tokens, &scenario.left, &scenario.right);
                         });
                     });
-                    if size_index == 0 {
+                    if scenario.size == 1024 {
                         // dijkstra is way too slow for large inputs
                         group.bench_function("dijkstra", |b| {
                             b.iter(|| {
-                                dijkstra(&left, &right);
+                                dijkstra(&scenario.left, &scenario.right);
                             });
                         });
-                    }
-                    group.finish();
-                }
-                {
-                    let mut group = c.benchmark_group(format!(
-                        "lcs_len/alpha:{:?}/edit:{:?}/{:?}",
-                        alphabet_size, edit_size, size
-                    ));
-                    group.throughput(criterion::Throughput::Elements(size as u64));
-                    group.sample_size(if size_index == 0 { 100 } else { 10 });
-                    if size_index == 0 {
                         // The naive algorithm is too slow for large inputs
-                        group.bench_function("naive", |b| {
+                        group.bench_function("naive_len", |b| {
                             b.iter(|| {
-                                naive_lcs_length(&left, &right);
+                                naive_lcs_length(&scenario.left, &scenario.right);
                             });
                         });
                     }
-                    group.bench_function("meyers", |b| {
+                    group.bench_function("meyers_len", |b| {
                         b.iter(|| {
-                            dijkstra(&left, &right);
+                            meyers_lcs_length(&scenario.left, &scenario.right);
                         });
                     });
-                    group.finish();
                 }
+                group.finish();
             }
         }
     }

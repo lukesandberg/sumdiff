@@ -14,6 +14,9 @@ struct MatchList {
     // N.B. These are 1-indexed to simplify later comparisons and allow for a zero sentinel value
     // This is a sorted list but will be mutated as we go.
     right_indices: Vec<usize>,
+    // The highest index in thresh that a corresponding index in right_indices could be assigned to
+    // This allows us to accelerate matching when matchlists are visited multiple times.
+    starting_k: Vec<usize>,
 }
 
 impl MatchList {
@@ -54,6 +57,7 @@ impl MatchList {
         }
         MatchList {
             matches: unsafe { transmute(matches) },
+            starting_k: vec![0; right_indices.len()],
             right_indices,
         }
     }
@@ -70,28 +74,41 @@ struct DMatch {
 /// the algorithm described by [Kuo and Cross](https://dl.acm.org/doi/pdf/10.1145/74697.74702)
 /// which improves on the classic algorithm by Hunt and Szymanski.
 ///
-/// This also includes a few minor optimizations over the algorithms described in the paper
-/// * Use exponential search to find insertion points in thresh
-///   - Saves substantial time in the worst case
-/// * Use exponential search to find offsets in matchlist for each row
-///   - for larger matchlists this is substantial
-/// * Use counting sort to build the matchlist (dropping O(NlogN) -> O(N) for the sort)
+/// It describes an algorithm with a runtime of `O(R + NL + NLog(N))` where:
+///   * `R` is the number of matching locations between left and right, i.e.  `R=|{(i,j) s.t. left[i] = right[j]}|`
+///      * Note, in the worst case `R` is O(N^2), and these cases are not particularly
+///        rare (consider that every blank line will match and if 10% of lines are blank, R is now >= 0.01*N^2).
+///        This is particularly likely with small-fixed alphabets (consider a genome comparison with only 4 tokens),
+///        we should expect a quadratic number of matches.
+///   * `L` is the length of the longest common subsequence
+///   * `N` is the length of the input sequences
+///
+/// The `R` term is due to how the matchlists are iterated, the `NL` term tracks assignments to threshold and the
+/// `NLog(N)` term is related to building the matchlist.
+///
+/// The implementation here improves on that in a few ways.
+/// * Use counting sort to build the matchlist (dropping `O(NlogN)` -> `O(N)` for the sort)
 ///   - This is workable due to our tokenization technique, the universe of tokens is trivially bound by the size of the inputs.
+///   - This improvement is useful for mostly theoretical reasons, the other optimizations are more practical.
+///
+/// * We use `exponential` search to find both insertion points in `thresh` and to iterate the `matchlist`. Despite the
+///   faster searches, this doesn't improve worst case performance (still benchmarks measured consistent 30%+ performance
+///   improvements).
+///
+/// * We use a set of `starting_k` values to accelerate the search of `thresh` for a given matchlist. This helps
+///   when we visit the same matchlist multiple times since it allows us to converge on possible update locations
+///   faster.  This optimization was more impactful for larger inputs, but ultimately doesn't close the performance
+///   gap with meyers
+///   - When `R` is close to `N^2` this means that visiting the same row multiple times will do less work. However
+///     it doesn't change the number of assignments to `thresh` or provide a lower upper bound than `NL`
+///
 /// * Use a pool of links to amortize allocation overheads
 ///   - This doesn't affect asymptotic complexity but does reduce the number of allocations and it is a practical
 ///     enhancement.
-///   - Compress DMatch nodes so they can efficiently represent ranges.
+///   - Compress DMatch nodes so they can efficiently represent ranges which are common
+///   - TODO(luke): Using a bump allocator would be superior
 ///
-/// The runtime of this algorithm is complex
-///  - The matchlist is built in O(N) time (due to counting sort !)
-///  - The readout at the end takes at O(N) time (generally much faster)
-///  - Anaylyzing the loop is difficult
-///     - For each match we run 2 exponential searches, one is on thresh (thus O(logN)) the other is on the matchlist which is worse case
-///       O(logR) (where R is the size of the matchlist), but averaging across all incides of `n` we should expect O(log(sqrt(R)) instead
-///       In the worst case R is O(N^2), so again we should expect each match to take O(logN) time.
-///     - The number of matches is not easy to bound however. `R` is a trivial upper bound but it is not tight.
-///
-/// Thus the overall complexity is O(NlogN).
+/// Thus the overall complexity is still at least O(NL). This is more or less informed by the `thresh` datastructure.
 ///
 /// * TODO(luke): find a way to use the implicit histogram of the matchlist to leverage a patience sort technique
 pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRange> {
@@ -121,7 +138,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
     // drop Vec methods for extending and memory supporting it
     let mut thresh = vec![m + 1; std::cmp::min(n, m) + 1].into_boxed_slice();
     thresh[0] = 0;
-    let matchlist = MatchList::build(tokens, left, right);
+    let mut matchlist = MatchList::build(tokens, left, right);
     // TODO: justify capacities
     let mut link_pool: Vec<DMatch> = Vec::with_capacity(n);
     // The zero entry is a dummy value
@@ -131,21 +148,33 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
         prev: 0,
         len: 0,
     });
-    let mut links: Vec<usize> = vec![0; m + 1];
+    let mut links: Vec<usize> = vec![0; std::cmp::min(n, m) + 1];
     let mut max_thresh = 1;
-    for (i, range) in matchlist.matches.iter().enumerate() {
+
+    for (i, &range) in matchlist.matches.iter().enumerate() {
         if range.0 == range.1 {
             continue;
         }
         let matches = &matchlist.right_indices[range.0..range.1];
-        let mut k = 0;
+        let starting_k = &mut matchlist.starting_k[range.0..range.1];
+        let mut k = starting_k[0];
         // These two fields serve as a tiny buffer to delay writes to the links array
         let mut r = 0;
         let mut c = links[0];
+        let mut prev_thresh = thresh[k];
         let mut mi = 0;
-        // This also reserves the 0th entry for the dummy value above and simplifies read-out.
-        let mut j = matches[mi];
         loop {
+            // Search for the next match index, greater than this one and smaller than the previous threshold
+            // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
+            // at indexes greater than k are strictly greater than prev_thresh
+            mi = exponential_search_range(matches, mi, matches.len(), prev_thresh + 1);
+            if mi >= matches.len() {
+                break;
+            }
+            let j = matches[mi];
+            // For a given mi value, see if we have already computed a higher starting location
+            // because we iterate over the matchlist multiple times we can accelerate the search
+            k = std::cmp::max(k, starting_k[mi]);
             let new_k = exponential_search_range(&thresh, k, max_thresh, j);
             debug_assert!(
                 thresh[new_k - 1] < j && thresh[new_k] >= j,
@@ -156,11 +185,11 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
                 max_thresh + 1,
                 &thresh[k..max_thresh + 1]
             );
-            let prev_thresh = thresh[new_k];
+            prev_thresh = thresh[new_k];
             k = new_k;
             // Only add a match if we are strictly decreasing the threshold
             if j < prev_thresh {
-                thresh[new_k] = j;
+                thresh[k] = j;
                 max_thresh = std::cmp::max(max_thresh, k + 1);
                 let prev = links[k - 1];
                 links[r] = c;
@@ -182,18 +211,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
                     });
                 }
             }
-            // Search for the next match index, greater than this one and smaller than the previous threshold
-            // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
-            // at indexes greater than k are strictly greater than prev_thresh
-            mi += 1;
-            if mi >= matches.len() {
-                break;
-            }
-            mi = exponential_search_range(matches, mi, matches.len(), prev_thresh + 1);
-            if mi >= matches.len() {
-                break;
-            }
-            j = matches[mi]
+            starting_k[mi] = k; // Update the starting_k value for the next time we visit this matchlist
         }
         links[r] = c;
     }
