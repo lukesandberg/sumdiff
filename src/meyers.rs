@@ -6,7 +6,9 @@ use std::mem::MaybeUninit;
 /// - https://blog.jcoglan.com/2017/02/12/the-myers-diff-algorithm-part-1/ was a secondary resource
 ///   with more examples.
 ///
-/// This implementation is very true to the paper.
+/// This implementation is very true to the paper. There are some slight differences to avoid dealing
+/// with negative numbers as array indices.  The algorithm is O((N+M)D) where D is the length of the
+/// diff.
 pub fn meyers_lcs_length(left: &[Token], right: &[Token]) -> usize {
     let n = left.len();
     let m = right.len();
@@ -38,7 +40,8 @@ pub fn meyers_lcs_length(left: &[Token], right: &[Token]) -> usize {
                 }
             };
 
-            // The corresponding y value is x - k but our k is offset by max_distance so correct for that
+            // The corresponding y value is x - k but our k is offset by max_distance so correct for that.
+            // The order of operations here is important to avoid underflow for our unsigned variables.
             let mut y = max_distance + x - k;
 
             // Follow the diagonal as far as we can.
@@ -51,6 +54,9 @@ pub fn meyers_lcs_length(left: &[Token], right: &[Token]) -> usize {
 
             v[k] = MaybeUninit::new(x);
             if x == n && y == m {
+                // d is the number of edits, so the length of the LCS is (n+m-d)/2
+                // This is because every edit accounts for one character on either side, but every common character
+                // accounts for one character on both sides.
                 return (max_distance - d) / 2;
             }
         }
