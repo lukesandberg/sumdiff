@@ -41,7 +41,7 @@ fn do_middle_snake(
     assume!(unsafe: m == right.len());
     let delta = n - m;
     let delta_odd = delta % 2 == 1;
-    let num_diagonals = n + m;
+    let num_diagonals = n + m + 1;
     assume!(unsafe: v_forward.len()>=num_diagonals+2);
     assume!(unsafe: v_backward.len()>=num_diagonals+2);
 
@@ -73,11 +73,9 @@ fn do_middle_snake(
     let mut b_upper = v_offset + delta;
     v_backward[b_upper] = n;
     let min_diagonal = v_offset - m; //  could be simplified to `1`
-    let max_diagonal = v_offset + n; // aka `num_diagonals + 1`
+    let max_diagonal = v_offset + n; // aka `num_diagonals
 
-    let mut d = 0; // just for debugging
     loop {
-        d += 1;
         if f_lower > min_diagonal {
             f_lower -= 1;
             v_forward[f_lower - 1] = 0;
@@ -171,6 +169,18 @@ fn do_middle_snake(
     }
 }
 
+// Returns the longest common subsequence of `right` and `left` using the Meyers LCS algorithm.
+//
+// This uses this linear space variation that executes in `O((N+M)D)` time and `O(N+M)` space.
+// See http://www.xmailserver.org/diff2.pdf for the original paper
+// The discussion at https://blog.jcoglan.com/2017/02/12/the-myers-diff-algorithm-part-1/ is also helpful for a more detailed
+// perspective and https://blog.robertelder.org/diff-algorithm/ offers some insight as well.
+// The xdiff implementation in side of git, uses some of the advice from the last link (independently discovered afaict)
+//
+// The implementation here is straightforward to the paper with some care taken to
+// * deal with using unsigned indices as rust requires
+// * reduce memory usage and initialization overhead
+//
 pub fn meyers_lcs(left: &[Token], right: &[Token]) -> Vec<CommonRange> {
     let Trimmed {
         left,
@@ -186,15 +196,24 @@ pub fn meyers_lcs(left: &[Token], right: &[Token]) -> Vec<CommonRange> {
     };
     let n = left.len();
     let m = right.len();
-    // TODO justify increment
-    let num_diagonals = n + m + 3;
+    // In `do_middle_snake` we need to traverse all the diagonals from `-m..=n`
+    // and we also place sentinel values on either side to simplify loop conditions.
+    // so `+2` for the sentinels and `+1` because the range of diagonals is inclusive.
+    let num_diagonals_and_slack = n + m + 3;
     // This vector is used to store the forward and backward diagonals as we go
     // SAFETY: we will only access values that have been initialized on each call
     // to `middle_snake`.  To reduce allocations we construct one vector and
     // create 2 slices.
-    let mut v: Vec<usize> =
-        unsafe { std::mem::transmute(vec![MaybeUninit::<usize>::uninit(); 2 * num_diagonals + 2]) };
-    let (forward, backward) = v.split_at_mut(num_diagonals);
+    // A better approach might be to use a dynamic array, if the LCS is long we won't end up
+    // needinng the full array in practice, however one allocation of uninitialized memory should
+    // be very cheap in practice.
+    let mut v: Vec<usize> = unsafe {
+        std::mem::transmute(vec![
+            MaybeUninit::<usize>::uninit();
+            2 * num_diagonals_and_slack
+        ])
+    };
+    let (forward, backward) = v.split_at_mut(num_diagonals_and_slack);
     do_meyers_lcs(prefix, left, prefix, right, forward, backward, &mut matches);
     if suffix > 0 {
         matches.push(CommonRange {
@@ -298,6 +317,7 @@ pub fn meyers_lcs_length(mut left: &[Token], mut right: &[Token]) -> usize {
         return trimmed_length;
     }
     let max_distance = n + m;
+    let num_diagonals = n + m + 1;
     // Save time by not initializing the entire vector
     // SAFETY: we will only access values that have been initialized.
     // For the first iteration we only access `k+1` which is pre-initialized to 0.
@@ -308,14 +328,15 @@ pub fn meyers_lcs_length(mut left: &[Token], mut right: &[Token]) -> usize {
 
     // In this way we only ever access values of v that were initialized by a prior iteration of the loop.
     let mut v: Vec<usize> =
-        unsafe { std::mem::transmute(vec![MaybeUninit::<usize>::uninit(); 2 * max_distance + 2]) };
+        unsafe { std::mem::transmute(vec![MaybeUninit::<usize>::uninit(); num_diagonals + 2]) };
 
     // We store 1 based `x` indexes in `v` to avoid negative numbers and reserve 0 as a lowermost value.
     let v_offset = m + 1;
     let mut lower = v_offset;
     let mut upper = v_offset;
-    let min_diagonal = v_offset - m;
-    let max_diagonal = v_offset + n;
+    let mut min_diagonal = v_offset - m; // aka `1`
+    let mut max_diagonal = v_offset + n; // aka `num_diagonals`
+
     // Because we trimmed the prefix and suffix we can start at 1
     // but we have to bootstrap the first value of the array.
     v[v_offset] = 1;
@@ -330,18 +351,28 @@ pub fn meyers_lcs_length(mut left: &[Token], mut right: &[Token]) -> usize {
             lower -= 1;
             v[lower - 1] = 0;
         } else {
+            // this means we have found the bottom edge, so we can start moving up diagonals
             lower += 1;
+            min_diagonal += 1;
+            // NOTE: this optimization only helps when `d>m` `d>n` at which point performance is
+            // already disaterous, however this is useful to allow us to decrease the
+            // the space of `v` that is accessed
         }
         if upper < max_diagonal {
             upper += 1;
             v[upper + 1] = 0;
         } else {
+            // this means we have found the right hand side, so we can start decreasing the max
+            // diagonal.
             upper -= 1;
+            max_diagonal -= 1;
         }
+        assume!(unsafe: (upper - lower) % 2 == 0);
         // k is our diagonal index
         for k in (lower..=upper).step_by(2) {
             let mut x = if v[k - 1] < v[k + 1] {
                 // Implicitly we are keeping the prior x value and incrementing 'y'
+                // NOTE: this might put y out of range
                 v[k + 1] - 1
             } else {
                 // Extend from the prior x and increment it.
@@ -419,6 +450,7 @@ mod tests {
             let length = meyers_lcs_length(&abc, &bac);
             assert_eq!(length, 2);
         }
+
         #[test]
         fn test_example_longer() {
             let mut tokens = Tokens::new();
@@ -426,6 +458,15 @@ mod tests {
             let bacada = lex_characters(&mut tokens, "bacada");
             let length = meyers_lcs_length(&abacad, &bacada);
             assert_eq!(length, 5);
+        }
+
+        #[test]
+        fn test_full_diff() {
+            let mut tokens = Tokens::new();
+            let abcde = lex_characters(&mut tokens, "abcde");
+            let fghijk = lex_characters(&mut tokens, "fghijk");
+            let length = meyers_lcs_length(&abcde, &fghijk);
+            assert_eq!(length, 0);
         }
     }
 
@@ -490,10 +531,19 @@ mod tests {
         }
 
         #[test]
-        fn test_full_diff() {
+        fn test_full_diff_odd_delta() {
             let mut tokens = Tokens::new();
             let abcde = lex_characters(&mut tokens, "abcde");
-            let fghij = lex_characters(&mut tokens, "fghijk");
+            let fghijk = lex_characters(&mut tokens, "fghijk");
+            let lcs = meyers_lcs(&abcde, &fghijk);
+            check_is_lcs(&CommonRange::flatten(&lcs), &abcde, &fghijk).unwrap();
+        }
+
+        #[test]
+        fn test_full_diff_even_delta() {
+            let mut tokens = Tokens::new();
+            let abcde = lex_characters(&mut tokens, "abcde");
+            let fghij = lex_characters(&mut tokens, "fghij");
             let lcs = meyers_lcs(&abcde, &fghij);
             check_is_lcs(&CommonRange::flatten(&lcs), &abcde, &fghij).unwrap();
         }
