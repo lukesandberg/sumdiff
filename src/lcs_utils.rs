@@ -29,7 +29,7 @@ pub fn counting_sort(arr: &[Token], max_token: usize) -> Vec<usize> {
 }
 
 /// Returns the length of the common prefix of `a` and `b`
-fn common_prefix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
+pub fn common_prefix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
     let mut i = 0;
     while i < a.len() && i < b.len() && a[i] == b[i] {
         i += 1;
@@ -38,7 +38,7 @@ fn common_prefix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
 }
 
 // Returns the length of the common suffix of `a` and `b`
-fn common_suffix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
+pub fn common_suffix<T: PartialEq + PartialOrd>(a: &[T], b: &[T]) -> usize {
     let n = a.len();
     let m = b.len();
     let limit = std::cmp::min(n, m);

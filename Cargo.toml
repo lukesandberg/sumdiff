@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 chrono = "0.4"
+assume = "0.5"
 
 [profile.dev]
 opt-level = 0

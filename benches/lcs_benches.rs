@@ -4,7 +4,7 @@ use sumdifflib::{
     dijkstra::dijkstra,
     kc::kc_lcs,
     lcs_utils::naive_lcs_length,
-    meyers::meyers_lcs_length,
+    meyers::{meyers_lcs, meyers_lcs_length},
     token::{Token, Tokens},
 };
 
@@ -147,6 +147,11 @@ fn lcs_benchmark(c: &mut Criterion) {
                     group.bench_function("meyers_len", |b| {
                         b.iter(|| {
                             meyers_lcs_length(&scenario.left, &scenario.right);
+                        });
+                    });
+                    group.bench_function("meyers", |b| {
+                        b.iter(|| {
+                            meyers_lcs(&scenario.left, &scenario.right);
                         });
                     });
                 }

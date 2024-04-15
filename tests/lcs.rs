@@ -3,7 +3,7 @@ use sumdifflib::{
     kc::kc_lcs,
     lcs_utils::{check_is_lcs, naive_lcs_length},
     lex::lex_characters,
-    meyers::meyers_lcs_length,
+    meyers::{meyers_lcs, meyers_lcs_length},
     token::{CommonRange, Token, Tokens},
 };
 #[cfg(test)]
@@ -29,10 +29,13 @@ fn do_lcs_test(test: LcsTest) {
     check_is_lcs(&dijkstra_lcs, &left_toks, &right_toks).unwrap();
     let meyers_length = meyers_lcs_length(&left_toks, &right_toks);
     assert_eq!(meyers_length, kc_lcs.len());
+    let myers_lcs = CommonRange::flatten(&meyers_lcs(&left_toks, &right_toks));
+    check_is_lcs(&myers_lcs, &left_toks, &right_toks).unwrap();
     match test.length {
         Some(len) => {
             assert_eq!(kc_lcs.len(), len);
             assert_eq!(dijkstra_lcs.len(), len);
+            assert_eq!(myers_lcs.len(), len);
         }
         None => {}
     }
@@ -40,6 +43,7 @@ fn do_lcs_test(test: LcsTest) {
         Some(value) => {
             assert_eq!(kc_lcs, value);
             assert_eq!(dijkstra_lcs, value);
+            assert_eq!(myers_lcs, value);
         }
         None => {}
     }
@@ -106,4 +110,13 @@ fn quickcheck_meyers_length(left: Vec<u8>, right: Vec<u8>) -> bool {
     let right_toks = lex_nums(&mut tokens, &right);
     let length = meyers_lcs_length(&left_toks, &right_toks);
     naive_lcs_length(&left_toks, &right_toks) == length
+}
+
+#[quickcheck]
+fn quickcheck_meyers(left: Vec<u8>, right: Vec<u8>) -> bool {
+    let mut tokens = Tokens::new();
+    let left_toks = lex_nums(&mut tokens, &left);
+    let right_toks = lex_nums(&mut tokens, &right);
+    let meyers_lcs = CommonRange::flatten(&meyers_lcs(&left_toks, &right_toks));
+    check_is_lcs(&meyers_lcs, &left_toks, &right_toks).is_ok()
 }
