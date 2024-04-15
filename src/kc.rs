@@ -97,10 +97,12 @@ struct DMatch {
 ///
 /// * We use a set of `starting_k` values to accelerate the search of `thresh` for a given matchlist. This helps
 ///   when we visit the same matchlist multiple times since it allows us to converge on possible update locations
-///   faster.  This optimization was more impactful for larger inputs, but ultimately doesn't close the performance
-///   gap with meyers
+///   faster.  This optimization is more impactful for larger inputs, but ultimately doesn't close the performance
+///   gap with meyers (up to 20% on larger inputs).
 ///   - When `R` is close to `N^2` this means that visiting the same row multiple times will do less work. However
-///     it doesn't change the number of assignments to `thresh` or provide a lower upper bound than `NL`
+///     it doesn't change the number of assignments to `thresh` or provide a lower upper bound than `NL`. To do
+///     that we would need to find a way to trim `R` as we go so that each time we visit the same row we need
+///     to look at less of it, this would drop the `R` term to merely `N`.
 ///
 /// * Use a pool of links to amortize allocation overheads
 ///   - This doesn't affect asymptotic complexity but does reduce the number of allocations and it is a practical
@@ -156,6 +158,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
             continue;
         }
         let matches = &matchlist.right_indices[range.0..range.1];
+        let matches_len = matches.len();
         let starting_k = &mut matchlist.starting_k[range.0..range.1];
         let mut k = starting_k[0];
         // These two fields serve as a tiny buffer to delay writes to the links array
@@ -167,8 +170,8 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
             // Search for the next match index, greater than this one and smaller than the previous threshold
             // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
             // at indexes greater than k are strictly greater than prev_thresh
-            mi = exponential_search_range(matches, mi, matches.len(), prev_thresh + 1);
-            if mi >= matches.len() {
+            mi = exponential_search_range(matches, mi, matches_len, prev_thresh + 1);
+            if mi >= matches_len {
                 break;
             }
             let j = matches[mi];
