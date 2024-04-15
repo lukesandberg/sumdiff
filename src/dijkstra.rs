@@ -357,7 +357,7 @@ mod tests {
         let left = lex_characters(&mut tokens, "ab");
         let right = lex_characters(&mut tokens, "cd");
         let lcs = CommonRange::flatten(&dijkstra(&left, &right));
-        assert_eq!(lcs, vec![]);
+        assert_eq!(lcs.len(), 0);
     }
 
     #[test]

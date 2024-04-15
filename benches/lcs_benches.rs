@@ -2,6 +2,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{thread_rng, Rng};
 use sumdifflib::{
     dijkstra::dijkstra,
+    hyyro::hyyro_lcs_len,
     kc::kc_lcs,
     lcs_utils::naive_lcs_length,
     meyers::{meyers_lcs, meyers_lcs_length},
@@ -152,6 +153,11 @@ fn lcs_benchmark(c: &mut Criterion) {
                     group.bench_function("meyers", |b| {
                         b.iter(|| {
                             meyers_lcs(&scenario.left, &scenario.right);
+                        });
+                    });
+                    group.bench_function("hyyro_len", |b| {
+                        b.iter(|| {
+                            hyyro_lcs_len(&tokens, &scenario.left, &scenario.right);
                         });
                     });
                 }
