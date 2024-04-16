@@ -37,6 +37,8 @@ fn do_middle_snake(
     v_backward: &mut [usize],
 ) -> Option<(usize, usize)> {
     assume!(unsafe: n>=m);
+    assume!(unsafe: n>0);
+    assume!(unsafe: m>0);
     assume!(unsafe: n == left.len());
     assume!(unsafe: m == right.len());
     let delta = n - m;
@@ -92,13 +94,14 @@ fn do_middle_snake(
         // NOTE: we can choose to iterate in increasing _or_ decreasing K, which will change the reported LCS.
         // Git apparently iterates in decreasing order.
         for k in (f_lower..=f_upper).step_by(2) {
-            // Are we at the left edge or is the diagonal to the left longer?
-            let mut x = if v_forward[k - 1] < v_forward[k + 1] {
+            let l = v_forward[k - 1];
+            let u = v_forward[k + 1];
+            let mut x = if l < u {
                 // Implicitly we are keeping the prior x value and incrementing 'y'
-                v_forward[k + 1] - 1
+                u - 1
             } else {
                 // Extend from the prior x and increment it.
-                v_forward[k - 1]
+                l
             };
             let mut y = v_offset + x - k;
             // Follow the diagonal as far as we can.
@@ -137,10 +140,12 @@ fn do_middle_snake(
         debug_assert!((b_upper - b_lower) % 2 == 0);
         // Now follow the reverse diagonals
         for k in (b_lower..=b_upper).step_by(2) {
-            let mut x = if v_backward[k - 1] < v_backward[k + 1] {
-                v_backward[k - 1] // keep x and decrement y
+            let l = v_backward[k - 1];
+            let u = v_backward[k + 1];
+            let mut x = if l < u {
+                l // keep x and decrement y
             } else {
-                v_backward[k + 1] - 1 // decrement x
+                u - 1 // decrement x
             };
 
             // The corresponding y value is x - k but our k is offset by v_offset so correct for that.
@@ -370,14 +375,16 @@ pub fn meyers_lcs_length(mut left: &[Token], mut right: &[Token]) -> usize {
         assume!(unsafe: (upper - lower) % 2 == 0);
         // k is our diagonal index
         for k in (lower..=upper).step_by(2) {
-            let mut x = if v[k - 1] < v[k + 1] {
+            let l = v[k - 1];
+            let u = v[k + 1];
+            let mut x = if l < u {
                 // Implicitly we are keeping the prior x value and incrementing 'y'
                 // NOTE: this might put y out of range
-                v[k + 1] - 1
+                u - 1
             } else {
                 // Extend from the prior x and increment it.
                 // because `v` is one indexed, it is already incremented
-                v[k - 1]
+                l
             };
 
             // The corresponding y value is x - k but our k is offset by offset so correct for that.
