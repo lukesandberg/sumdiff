@@ -1,3 +1,4 @@
+use rug::ops::SubFrom;
 use rug::{Assign, Integer};
 
 use crate::{
@@ -40,10 +41,12 @@ pub fn hyyro_lcs_len(tokens: &Tokens, mut left: &[Token], mut right: &[Token]) -
     let mut v = Integer::with_capacity(num_bits + 1);
     v.set_bit(num_bits.try_into().unwrap(), true);
     v -= 1;
+    v.keep_bits_mut(num_bits as u32);
     // use temporaries to avoid re-allocating integers inside the loop
     let mut u = Integer::with_capacity(num_bits);
+    // t1 needs an extra bit for the addition to avoid reallocation.
+    // we don't actually care about the extra bit
     let mut t1 = Integer::with_capacity(num_bits + 1);
-    let mut t2 = Integer::with_capacity(num_bits);
     for b in right {
         let pm = matches.get(*b as usize).unwrap();
         // From the paper
@@ -51,14 +54,14 @@ pub fn hyyro_lcs_len(tokens: &Tokens, mut left: &[Token], mut right: &[Token]) -
         // v' = (v' + u) | (v' - u)
         u.assign(&v & pm);
         t1.assign(&v + &u);
-        t2.assign(&v - &u);
-        v.assign(&t1 | &t2);
-        // The initialization of v has an extra bit we need to drop
-        // each iteration may carry a bit out, so we need to truncate it.
-        v.keep_bits_mut(num_bits as u32);
+        // The addition may have carried a bit that we don't want
+        t1.keep_bits_mut(num_bits as u32);
+        u.sub_from(&v);
+        v.assign(&t1 | &u);
     }
-    // confusingly count_zeros only works on negative numbers
-    num_bits - v.count_ones().unwrap() as usize
+    // confusingly count_zeros only works on negative numbers, so we count ones and subtract from the total to get
+    // the number of zeros as required.
+    (num_bits - v.count_ones().unwrap() as usize) + trimmed_length
 }
 
 #[cfg(test)]
