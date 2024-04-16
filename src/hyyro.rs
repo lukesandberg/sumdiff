@@ -1,21 +1,35 @@
 use rug::{Assign, Integer};
 
-use crate::token::{Token, Tokens};
+use crate::{
+    lcs_utils::{common_prefix, common_suffix},
+    token::{Token, Tokens},
+};
 
 /// Computes the length of an LCS between two slices of tokens using the Hyyro algorithm.
 /// Bit-Parallel LCS-length Computation Revisited
 /// https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=7b1385ba60875b219ce76d5dc0fb343f664c6d6a
 ///
 /// The algorithm leverages bit-parallelism and vector instructions to speed up computation
-/// 
+///
 /// This is mostly for benchmarking purposes, as it consistenly loses to the `meyers` algorithm.
-pub fn hyyro_lcs_len(tokens: &Tokens, left: &[Token], right: &[Token]) -> usize {
-    // TODO: arrange for n = m
+pub fn hyyro_lcs_len(tokens: &Tokens, mut left: &[Token], mut right: &[Token]) -> usize {
+    let prefix = common_prefix(left, right);
+    if prefix > 0 {
+        left = &left[prefix..];
+        right = &right[prefix..];
+    }
+    let suffix = common_suffix(left, right);
+    if suffix > 0 {
+        left = &left[..left.len() - suffix];
+        right = &right[..right.len() - suffix];
+    }
     let n = left.len();
     let m = right.len();
+    let trimmed_length = prefix + suffix;
     if n == 0 || m == 0 {
-        return 0;
+        return trimmed_length;
     }
+    // TODO: arrange for n <= m
     let num_bits = n;
     // For every token, we store a bitset of all the positions it appears in the left string
     let mut matches = vec![Integer::with_capacity(num_bits); tokens.token_upper_bound()];
