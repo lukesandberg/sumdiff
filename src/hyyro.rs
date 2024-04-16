@@ -40,8 +40,11 @@ pub fn hyyro_lcs_len(tokens: &Tokens, mut left: &[Token], mut right: &[Token]) -
     }
     let mut v = Integer::with_capacity(num_bits + 1);
     v.set_bit(num_bits.try_into().unwrap(), true);
-    v -= 1;
+    v -= 1; // 2^n - 1 sets all bits [0..n-1] on.
+            
+    // This is not strictly necessary but ensures that the operations below never consider the extra bit.
     v.keep_bits_mut(num_bits as u32);
+
     // use temporaries to avoid re-allocating integers inside the loop
     let mut u = Integer::with_capacity(num_bits);
     // t1 needs an extra bit for the addition to avoid reallocation.
