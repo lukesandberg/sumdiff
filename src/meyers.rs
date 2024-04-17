@@ -21,12 +21,12 @@ fn middle_snake(
     // if either has length one and the other has length 2 or 1 then we are done since
     // prefix/suffixes have been removed so the comparisons are done.
     if m == 0 || n == 0 || (n == 1 && m <= 2) || (n <= 2 && m == 1) {
-        return None;
+        None
+    } else if m > n {
+        do_middle_snake(m, right, n, left, v_backward, v_forward).map(|(x, y)| (y, x))
+    } else {
+        do_middle_snake(n, left, m, right, v_forward, v_backward)
     }
-    if m > n {
-        return do_middle_snake(m, right, n, left, v_backward, v_forward).map(|(x, y)| (y, x));
-    }
-    return do_middle_snake(n, left, m, right, v_forward, v_backward);
 }
 fn do_middle_snake(
     n: usize,
