@@ -55,7 +55,7 @@ nodes visited.  In principle this is `O(ND)` which is much worse than Meyers.
 
 After working on all 3 it is clear that the criticisms of Meyers are completely accurate (except for the thing about 'complex priority queues').  The KC algorithm only becomes competitive when the alphabet size becomes large and the number of edits is also large (aka `D` is large), and for dijkstra to become competitive does require stealing representation techniques from Meyers.
 
-The key insight of Meyers is to target `D` (the number of edits) instead of `L` (the LCS), which
+The key insight of Meyers is to target `D` (the number of edits) instead of `L` (the LCS), which is useful for standard diff scenarios where our expecation is that `D` is small.
 
 ## TODO
 

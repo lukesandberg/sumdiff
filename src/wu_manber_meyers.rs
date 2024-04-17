@@ -12,6 +12,7 @@ use crate::{
 /// Where `D` is the edit distance and `P` is number of deletions in an edit script.
 ///
 pub fn wu_manber_meyers_lcs_length(mut left: &[Token], mut right: &[Token]) -> usize {
+    // Start by trimming suffixes and prefixes to reduce the size of the superlinear algorithm.
     let prefix = common_prefix(left, right);
     if prefix > 0 {
         left = &left[prefix..];

@@ -1,4 +1,5 @@
 use crate::token::{CommonRange, Token};
+use assume::assume;
 use std::mem::{transmute, MaybeUninit};
 
 /// Peforms a simple 'counting' sort on the token array, but returns the indices of the sorted token locations
@@ -113,8 +114,8 @@ pub fn remove_suffixes_and_prefixes<'a>(
 /// It is the callers responsibility to ensure that offset and end are in range
 ///
 /// For our usecase this significantly outperforms the standard library binary search.
-fn binary_search_range(arr: &[usize], offset: usize, end: usize, x: usize) -> usize {
-    debug_assert!(offset < end && end <= arr.len() && offset < arr.len());
+pub fn binary_search_range(arr: &[usize], offset: usize, end: usize, x: usize) -> usize {
+    assume!(unsafe:offset < end && end <= arr.len() && offset < arr.len());
     let mut low = offset;
     let mut size = end - low;
     // The loop condition is easy to predict but the comparison within the

@@ -1,10 +1,14 @@
+use assume::assume;
 use std::{
     mem::{transmute, MaybeUninit},
     vec,
 };
 
 use crate::{
-    lcs_utils::{counting_sort, exponential_search_range, remove_suffixes_and_prefixes, Trimmed},
+    lcs_utils::{
+        binary_search_range, counting_sort, exponential_search_range, remove_suffixes_and_prefixes,
+        Trimmed,
+    },
     token::{CommonRange, Token, Tokens},
 };
 
@@ -99,10 +103,14 @@ struct DMatch {
 ///   when we visit the same matchlist multiple times since it allows us to converge on possible update locations
 ///   faster.  This optimization is more impactful for larger inputs, but ultimately doesn't close the performance
 ///   gap with meyers (up to 20% on larger inputs).
-///   - When `R` is close to `N^2` this means that visiting the same row multiple times will do less work. However
-///     it doesn't change the number of assignments to `thresh` or provide a lower upper bound than `NL`. To do
-///     that we would need to find a way to trim `R` as we go so that each time we visit the same row we need
-///     to look at less of it, this would drop the `R` term to merely `N`.
+///
+/// * We restrict the range of matches we consider on each row to only those that could increase the LCS length
+///   - This relies on an insight from Hyyro that if the LCS length is `t` then the only matches that could be on the
+///     LCS are those on diagonals (m-t)..(n-t) of the implicit matrix L from the Wagner-Fischer recurrence.
+///     Because we refine our estimate of the LLCS as we execute (whenever we extend `thresh`) this means we can
+///     narrow the range of matches we consider.  This is both a practical and a theoretical optimization to KC
+///     It doesn't affect the number of assignments to `thresh` but it does reduce the number of comparisons we make for
+///     each row by `L` (the length of the LCS).  This reduces the `R` term to `R/L`.
 ///
 /// * Use a pool of links to amortize allocation overheads
 ///   - This doesn't affect asymptotic complexity but does reduce the number of allocations and it is a practical
@@ -110,7 +118,7 @@ struct DMatch {
 ///   - Compress DMatch nodes so they can efficiently represent ranges which are common
 ///   - TODO(luke): Using a bump allocator would be superior
 ///
-/// Thus the overall complexity is still at least O(NL). This is more or less informed by the `thresh` datastructure.
+/// Thus the overall complexity is still at least O(NL + R/L). This is more or less informed by the `thresh` datastructure.
 ///
 /// * TODO(luke): find a way to use the implicit histogram of the matchlist to leverage a patience sort technique
 pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRange> {
@@ -131,7 +139,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
     let m = right.len();
     // At this point we know that the inputs are non-empty, at least one is longer than 1, and they have no common
     // prefix or suffix.
-    debug_assert!((n > 1 && m > 0) || (n > 0 && m > 1), "n = {}, m = {}", n, m);
+    assume!(unsafe: (n > 1 && m > 0) || (n > 0 && m > 1), "n = {}, m = {}", n, m);
 
     // Thresh stores indexes of right where we could advance the LCS.  To simplify some comparisons we
     // Initialize it with m+1 so all values are greater than any index of right, and we make it as
@@ -153,31 +161,62 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
     let mut links: Vec<usize> = vec![0; std::cmp::min(n, m) + 1];
     let mut max_thresh = 1;
 
-    for (i, &range) in matchlist.matches.iter().enumerate() {
-        if range.0 == range.1 {
+    // From "Bit Parallel LCS-length Computation Revisited"
+    // https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=7b1385ba60875b219ce76d5dc0fb343f664c6d6a
+    // We see the observation that if LLCS(left, right) >=t, then the only matches between left and right
+    // that are on the LCS must be in diagonals -(n-t)..(m-t) of the implicit matrix L from the Wagner+Fishcer recurrence
+    //
+    // The implication of this is that we can restrict the range of matches we consider in each iteration to only those within
+    // the range of diagonals defined by our lower bound estimate `max_thresh-1`. As we expand `thresh` our LCS estimate is
+    // refined and we can further restrict the range of matches we consider.
+
+    for (i, (mut mi, mut matches_end)) in matchlist.matches.iter().enumerate() {
+        if mi == matches_end {
             continue;
         }
-        let matches = &matchlist.right_indices[range.0..range.1];
-        let matches_len = matches.len();
-        let starting_k = &mut matchlist.starting_k[range.0..range.1];
-        let mut k = starting_k[0];
+        // TODO: this is very conditional, can we simplify it?
+        let lcs_estimate = max_thresh - 1;
+
+        let max_diag = n - lcs_estimate;
+        // TODO conditional logic instead of saturating sub?
+        let min_j = i.saturating_sub(max_diag);
+        if min_j > 0 {
+            // we need to +1 because the values stored in matches are 1-indexed
+            mi = binary_search_range(&matchlist.right_indices, mi, matches_end, min_j + 1);
+            if mi == matches_end {
+                continue;
+            }
+        }
+
+        let negative_min_diag = m - lcs_estimate;
+        let max_j = i + negative_min_diag;
+        // +2 because we are 1 indexed and we want to be inclusive
+        matches_end = binary_search_range(&matchlist.right_indices, mi, matches_end, max_j + 2);
+        if mi == matches_end {
+            continue;
+        }
+        let mut k = matchlist.starting_k[mi];
         // These two fields serve as a tiny buffer to delay writes to the links array
         let mut r = 0;
         let mut c = links[0];
         let mut prev_thresh = thresh[k];
-        let mut mi = 0;
         loop {
             // Search for the next match index, greater than this one and smaller than the previous threshold
             // This allows us to exclude values that couldn't possibly decrease thresh, since all values in thresh
             // at indexes greater than k are strictly greater than prev_thresh
-            mi = exponential_search_range(matches, mi, matches_len, prev_thresh + 1);
-            if mi >= matches_len {
+            mi = exponential_search_range(
+                &matchlist.right_indices,
+                mi,
+                matches_end,
+                prev_thresh + 1,
+            );
+            if mi >= matches_end {
                 break;
             }
-            let j = matches[mi];
+            let j = matchlist.right_indices[mi];
             // For a given mi value, see if we have already computed a higher starting location
             // because we iterate over the matchlist multiple times we can accelerate the search
-            k = std::cmp::max(k, starting_k[mi]);
+            k = std::cmp::max(k, matchlist.starting_k[mi]);
             let new_k = exponential_search_range(&thresh, k, max_thresh, j);
             debug_assert!(
                 thresh[new_k - 1] < j && thresh[new_k] >= j,
@@ -214,7 +253,7 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
                     });
                 }
             }
-            starting_k[mi] = k; // Update the starting_k value for the next time we visit this matchlist
+            matchlist.starting_k[mi] = k; // Update the starting_k value for the next time we visit this matchlist
         }
         links[r] = c;
     }
@@ -331,6 +370,25 @@ mod tests {
 
         let left = lex_characters(&mut tokens, "b");
         let right = lex_characters(&mut tokens, "aba");
+        let kc = CommonRange::flatten(&kc_lcs(&tokens, &left, &right));
+        check_is_lcs(&kc, &left, &right).unwrap();
+    }
+
+    #[test]
+    fn test_kc_buggy_diagonal_range() {
+        let mut tokens = Tokens::new();
+
+        let left = lex_characters(&mut tokens, "b");
+        let right = lex_characters(&mut tokens, "aaba");
+        let kc = CommonRange::flatten(&kc_lcs(&tokens, &left, &right));
+        check_is_lcs(&kc, &left, &right).unwrap();
+    }
+
+    #[test]
+    fn test_kc_buggy_diagonal_range_2() {
+        let mut tokens = Tokens::new();
+        let left = lex_characters(&mut tokens, "abc");
+        let right = lex_characters(&mut tokens, "cab");
         let kc = CommonRange::flatten(&kc_lcs(&tokens, &left, &right));
         check_is_lcs(&kc, &left, &right).unwrap();
     }
