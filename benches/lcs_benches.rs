@@ -7,6 +7,7 @@ use sumdifflib::{
     lcs_utils::naive_lcs_length,
     meyers::{meyers_lcs, meyers_lcs_length},
     token::{Token, Tokens},
+    wu_manber_meyers::wu_manber_meyers_lcs_length,
 };
 
 const SIZE: &[usize] = &[1024, 2048, 4096, 8192, 16384];
@@ -158,6 +159,11 @@ fn lcs_benchmark(c: &mut Criterion) {
                     group.bench_function("hyyro_len", |b| {
                         b.iter(|| {
                             hyyro_lcs_len(&tokens, &scenario.left, &scenario.right);
+                        });
+                    });
+                    group.bench_function("wu_manber_meyers_len", |b| {
+                        b.iter(|| {
+                            wu_manber_meyers_lcs_length(&scenario.left, &scenario.right);
                         });
                     });
                 }

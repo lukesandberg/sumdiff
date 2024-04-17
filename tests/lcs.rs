@@ -6,6 +6,7 @@ use sumdifflib::{
     lex::lex_characters,
     meyers::{meyers_lcs, meyers_lcs_length},
     token::{CommonRange, Token, Tokens},
+    wu_manber_meyers::wu_manber_meyers_lcs_length,
 };
 #[cfg(test)]
 extern crate quickcheck;
@@ -32,6 +33,9 @@ fn do_lcs_test(test: LcsTest) {
     assert_eq!(meyers_length, kc_lcs.len());
     let hyyro_length = hyyro_lcs_len(&tokens, &left_toks, &right_toks);
     assert_eq!(hyyro_length, kc_lcs.len());
+
+    let wu_manber_meyers_length = wu_manber_meyers_lcs_length(&left_toks, &right_toks);
+    assert_eq!(wu_manber_meyers_length, kc_lcs.len());
     let myers_lcs = CommonRange::flatten(&meyers_lcs(&left_toks, &right_toks));
     check_is_lcs(&myers_lcs, &left_toks, &right_toks).unwrap();
     match test.length {
@@ -130,5 +134,13 @@ fn quickcheck_hyyro_length(left: Vec<u8>, right: Vec<u8>) -> bool {
     let left_toks = lex_nums(&mut tokens, &left);
     let right_toks = lex_nums(&mut tokens, &right);
     let length = hyyro_lcs_len(&tokens, &left_toks, &right_toks);
+    naive_lcs_length(&left_toks, &right_toks) == length
+}
+#[quickcheck]
+fn quickcheck_wu_manber_meyers_lcs_length(left: Vec<u8>, right: Vec<u8>) -> bool {
+    let mut tokens = Tokens::new();
+    let left_toks = lex_nums(&mut tokens, &left);
+    let right_toks = lex_nums(&mut tokens, &right);
+    let length = wu_manber_meyers_lcs_length(&left_toks, &right_toks);
     naive_lcs_length(&left_toks, &right_toks) == length
 }

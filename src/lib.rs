@@ -8,3 +8,4 @@ pub mod lcs_utils;
 pub mod lex;
 pub mod meyers;
 pub mod token;
+pub mod wu_manber_meyers;
