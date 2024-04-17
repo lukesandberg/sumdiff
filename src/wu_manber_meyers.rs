@@ -42,52 +42,56 @@ fn do_wu_manber_meyers_lcs_length(n: usize, left: &[Token], m: usize, right: &[T
     assume!(unsafe: n<=m);
     assume!(unsafe: n == left.len());
     assume!(unsafe: m == right.len());
-    // TODO: justify offsets
+    // The largest possiple `p` value is `n` and we need to be able to access a sentinel value at offset-p-1
+    // so offset has to be at least n+1;
     let offset = n + 1;
     // Unlike the paper we initialize to 0 instead of -1.
     // This is because rust0 based indexing and usize cannot take on negative numbers, so
     // we store 1-based indices in here and simply adjust them in `snake` to 0-based indices.
-    let mut fp = vec![0usize; offset + m + 2];
-    // This is the diagonal that (n,m) is on
+    // The largest value we access is when `p=n``, in which case we access `p+delta_index+1`
+    // in the second loop.
+    // By simplifying that we see that the largest value is `n+m+2`, so an array containing that
+    // value must have size n+m+3
+    let mut fp = vec![0usize; n + m + 3];
+    // This is the diagonal that (n,m) is on.  A simplification of `offset + (m-n)`
     let delta_index = m + 1;
 
-    // At this point we know that there is no snake along diagonal 0
+    // At this point we know that there is no snake along diagonal 0, so at least some calls to
+    // `snake` in the first iteration will be worthless.  However, we do access other diagonals
+    // based on delta so skipping/simplifying the first iteration is non-trivial unless delta is 0.
+    // Don't bother.
     let mut p: usize = 0;
     loop {
         // The paper defines this as [-p, delta-1], which is [-p,delta) as a half exclusive interval.
         // NOTE: `p` is bounded by `n` because it tracks the number of deletations and we cannot
         // delete more than `n` tokens.
         assume!(unsafe: p<=n);
-        // thus k_index is always >=1
-        let mut k_index = offset - p;
-        assume!(unsafe: k_index >= 1);
         let mut lower = 0;
-        while k_index < delta_index {
+        for k_index in (offset - p)..delta_index {
+            // Because p <=n and offset = n+1, we know that k_index >= 1, make sure the compiler can tell.
+            assume!(unsafe: k_index >= 1);
             let y = std::cmp::max(fp[k_index - 1] + 1, fp[k_index + 1]);
             let x = offset + y - k_index;
             lower = snake(x, y, n, left, m, right);
             fp[k_index] = lower;
-            k_index += 1;
         }
-        // The paper defines this as [delta+p-> delta+1]
-        // NOTE: again that `p` is bounded by `n`, so `k_index` is bounded by `n+m+1`
-        k_index = delta_index + p;
-        assume!(unsafe: k_index <= n + m + 1);
 
         let mut upper = 0;
-        while k_index > delta_index {
+        // The paper defines this as [delta+p-> delta+1]
+        for k_index in ((delta_index + 1)..=(delta_index + p)).rev() {
+            // NOTE: again that `p` is bounded by `n`, so `k_index` is bounded by `n+m+1`
+            assume!(unsafe: k_index <= n + m + 1);
             let y = std::cmp::max(fp[k_index - 1] + 1, fp[k_index + 1]);
             let x = offset + y - k_index;
             upper = snake(x, y, n, left, m, right);
             fp[k_index] = upper;
-            k_index -= 1;
         }
         let y = std::cmp::max(lower + 1, upper);
         let x = offset + y - delta_index;
         let fp_delta = snake(x, y, n, left, m, right);
-        // snake returns 0 based indices and we are looking for when we hit the end of the right string
-        // `fp_delta` is a 1 based index into `right`, so our exit condition is `fp_delta == m+1`
-        // which is conveniently equivalent to `fp_delta == delta_index` due to how the offsets are set up
+        // `snake` returns 1 based indices and we are looking for when we hit the end of the right string
+        // so our exit condition is `fp_delta == m+1` which is conveniently equivalent to
+        // `fp_delta == delta_index` due to how the offsets are set up.
         if fp_delta == delta_index {
             // The LCS length is (max_distance - edit_distance) / 2
             // max_distance = n + m
