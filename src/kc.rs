@@ -141,6 +141,10 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
     // prefix or suffix.
     assume!(unsafe: (n > 1 && m > 0) || (n > 0 && m > 1), "n = {}, m = {}", n, m);
 
+    // Intuition for `thresh`: Each value `j` in thresh at index `i` is a dominant match between left and right on
+    // a common subsequence of length `i`. We store the predecessor of that match in the `links` array, such that
+    // each entry in `thresh` is the head of a 'chain' of matches through the matchlist.
+
     // Thresh stores indexes of right where we could advance the LCS.  To simplify some comparisons we
     // Initialize it with m+1 so all values are greater than any index of right, and we make it as
     // long as the longest possible LCS.  Furthermore we initialize `thresh[0]=0` and use 1 based indexing
@@ -149,7 +153,8 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
     let mut thresh = vec![m + 1; std::cmp::min(n, m) + 1].into_boxed_slice();
     thresh[0] = 0;
     let mut matchlist = MatchList::build(tokens, left, right);
-    // TODO: justify capacities
+    // The worst case is that we need L^2 links, our link compression techniques will reduce this in practice
+    // but not the theoretical worst case.
     let mut link_pool: Vec<DMatch> = Vec::with_capacity(n);
     // The zero entry is a dummy value
     link_pool.push(DMatch {
@@ -169,6 +174,10 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
     // The implication of this is that we can restrict the range of matches we consider in each iteration to only those within
     // the range of diagonals defined by our lower bound estimate `max_thresh-1`. As we expand `thresh` our LCS estimate is
     // refined and we can further restrict the range of matches we consider.
+    // This approach was also described by Bergroth in
+    // "Utilizing Dynamically Updated Estimates in Solving the Longest Common Subsequence Problem", though I only discovered that
+    // later.
+    // TODO: implement the BestNext heuristic from Bergroth to further improve this.
 
     for (i, (mut mi, mut matches_end)) in matchlist.matches.iter().enumerate() {
         if mi == matches_end {
@@ -178,11 +187,9 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
         let lcs_estimate = max_thresh - 1;
 
         let max_diag = n - lcs_estimate;
-        // TODO conditional logic instead of saturating sub?
-        let min_j = i.saturating_sub(max_diag);
-        if min_j > 0 {
+        if i > max_diag {
             // we need to +1 because the values stored in matches are 1-indexed
-            mi = binary_search_range(&matchlist.right_indices, mi, matches_end, min_j + 1);
+            mi = binary_search_range(&matchlist.right_indices, mi, matches_end, i - max_diag + 1);
             if mi == matches_end {
                 continue;
             }
@@ -190,10 +197,12 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
 
         let negative_min_diag = m - lcs_estimate;
         let max_j = i + negative_min_diag;
-        // +2 because we are 1 indexed and we want to be inclusive
-        matches_end = binary_search_range(&matchlist.right_indices, mi, matches_end, max_j + 2);
-        if mi == matches_end {
-            continue;
+        if max_j < m {
+            // +2 because we are 1 indexed and we want to be inclusive
+            matches_end = binary_search_range(&matchlist.right_indices, mi, matches_end, max_j + 2);
+            if mi == matches_end {
+                continue;
+            }
         }
         let mut k = matchlist.starting_k[mi];
         // These two fields serve as a tiny buffer to delay writes to the links array
@@ -229,8 +238,15 @@ pub fn kc_lcs(tokens: &Tokens, left: &[Token], right: &[Token]) -> Vec<CommonRan
             );
             prev_thresh = thresh[new_k];
             k = new_k;
-            // Only add a match if we are strictly decreasing the threshold
+            // Only add a match if we are strictly decreasing the threshold at this index
             if j < prev_thresh {
+                // TODO: when replacing a thresh that is <m+1 we could potentially shift
+                // the previous value _up_ in thresh.  This is only valid if that value
+                // also matches an index in left that is > i. To do that we would need
+                // to store more information in thresh and possibly store matchlists in
+                // both directions.
+                // If when storing in `thresh` we also stored all the indices in `left` of
+                // that value > i, then we could remove that value from the matchlist.
                 thresh[k] = j;
                 max_thresh = std::cmp::max(max_thresh, k + 1);
                 let prev = links[k - 1];
